@@ -1,12 +1,24 @@
 name: Utgivelse
 
-# Starter på to måter:
-#  1. Actions › Utgivelse › «Run workflow» (versjonen hentes fra app/package.json)
-#  2. Push en versjons-tag:  git tag v1.1.1 && git push origin v1.1.1
+# Starter på tre måter:
+#  1. Automatisk ved push til main når versjonen i app/package.json er ny (ikke publisert fra før)
+#  2. Actions › Utgivelse › «Run workflow» (bygger versjonen i app/package.json på nytt)
+#  3. Push en versjons-tag:  git tag v1.1.1 && git push origin v1.1.1
 on:
   workflow_dispatch:
   push:
+    branches: [main]
     tags: ['v*']
+    paths:
+      - 'app/**'
+      - 'bootstrap/**'
+      - 'build/**'
+      - 'CHANGELOG.md'
+      - '.github/workflows/release.yml'
+
+concurrency:
+  group: release
+  cancel-in-progress: false
 
 permissions:
   contents: write
@@ -29,11 +41,22 @@ jobs:
           echo "TAG=v$APPV" >> "$GITHUB_ENV"
           echo "VERSION=$APPV" >> "$GITHUB_ENV"
 
+      - name: Hopp over hvis versjonen allerede er publisert (gjelder push til main)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ "$GITHUB_REF_TYPE" = "branch" ] && [ "$GITHUB_EVENT_NAME" = "push" ] && gh release view "$TAG" > /dev/null 2>&1; then
+            echo "Versjon $VERSION er allerede publisert. Øk versjonen i app/package.json for å publisere på nytt."
+            echo "SKIP=1" >> "$GITHUB_ENV"
+          fi
+
       - name: Sjekk JavaScript-syntaks
+        if: env.SKIP != '1'
         run: |
           for f in app/*.js app/renderer/*.js bootstrap/*.js; do node --check "$f"; done
 
       - name: Installer byggeverktøy
+        if: env.SKIP != '1'
         run: |
           sudo apt-get update -q
           sudo apt-get install -y -q xorriso zip unzip
@@ -43,9 +66,11 @@ jobs:
           sudo install -m 755 apple-codesign-0.29.0-x86_64-unknown-linux-musl/rcodesign /usr/local/bin/rcodesign
 
       - name: Bygg DMG og oppdateringspakke
+        if: env.SKIP != '1'
         run: bash build/make-dmg.sh
 
       - name: Publiser utgivelsen
+        if: env.SKIP != '1'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |

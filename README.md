@@ -28,7 +28,7 @@ Etter det oppdaterer appen seg selv. Terminal-kommandoen trengs ikke ved oppdate
    git push
    ```
 
-5. Gå til **Actions › Utgivelse › Run workflow** på GitHub og trykk den grønne knappen. (Alternativt: push en tag, `git tag v1.1.1 && git push origin v1.1.1`.)
+Det er alt. Når en push til `main` inneholder en ny versjon, publiseres den automatisk. Pushes uten ny versjon bygger ingenting. (**Actions › Utgivelse › Run workflow** bygger gjeldende versjon på nytt ved behov.)
 
 GitHub Actions bygger da `Filutforsker.dmg` og oppdateringspakken og publiserer dem som en utgivelse med tag `v<versjon>`. Appen ser etter oppdateringer ved oppstart og hver sjette time, og viser «Oppdater nå» når en ny versjon finnes. Følg med under **Actions** i repositoriet; bygget tar noen minutter.
 
