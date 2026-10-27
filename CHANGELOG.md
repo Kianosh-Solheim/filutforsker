@@ -2,6 +2,12 @@
 
 Hver versjon har en overskrift `## x.y.z`. Teksten under vises i appen når far trykker «Hva er nytt».
 
+## 1.1.1
+
+- «Sorter bilder» forklarer nå tydelig når bilder bare ligger i skyen, og viser hvor mye som må lastes ned.
+- Valget om å laste ned og flytte disse bildene ligger nå direkte i oversikten, så du slipper å starte på nytt.
+- Advarsel hvis det ikke er nok ledig plass på Macen til nedlastingen.
+
 ## 1.1.0
 
 - Filutforsker kan nå oppdatere seg selv. Når en ny versjon finnes, vises en blå linje med knappen «Oppdater nå».

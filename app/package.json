@@ -1,7 +1,7 @@
 {
   "name": "filutforsker",
   "productName": "Filutforsker",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "Filutforsker i Windows 11-stil for Mac, med skystatus for iCloud, OneDrive, Google Drive og Dropbox.",
   "main": "main.js",
   "author": "Kianosh F. Solheim",

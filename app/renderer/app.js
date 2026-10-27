@@ -1255,32 +1255,55 @@ async function psScan() {
   psSummary(r);
 }
 
-function psSummary(r) {
+async function psSummary(r) {
   if (!r.count) {
     modal([h('h3', { html: PS_ICON + 'Fant ingen bilder' }), h('p', {}, 'Fant ingen bilder eller videoer som ikke allerede ligger i All Photos.')],
       [h('button', { class: 'btn accent', onclick: closeModal }, 'Lukk')]);
     return;
   }
-  const table = h('table', { class: 'summary-table' });
-  for (const [k, v] of Object.entries(r.byProvider).sort((a, b) => b[1] - a[1])) table.append(h('tr', {}, h('td', {}, k), h('td', {}, plural(v, 'fil', 'filer'))));
-  const fromCloud = Object.entries(r.byProvider).filter(([k]) => k !== 'Denne Macen').reduce((a, [, v]) => a + v, 0);
-  const toMove = psState.includeOnline ? r.count : r.count - r.onlineOnly;
-  const notes = [];
-  if (fromCloud) notes.push(h('div', { class: 'note warn', html: WARN_ICON }, h('div', {},
-    h('b', {}, `${plural(fromCloud, 'fil', 'filer')} ligger i skylagring. `),
-    'Når de flyttes til All Photos, fjernes de fra skyen og fra andre enheter, men blir liggende trygt på denne Macen.')));
-  if (r.onlineOnly && !psState.includeOnline) notes.push(h('div', { class: 'note info', html: INFO_ICON }, h('div', {}, `${plural(r.onlineOnly, 'fil', 'filer')} ligger bare i skyen og hoppes over. Velg «Ta med bilder som bare ligger i skyen» for å ta dem med.`)));
-  if (r.onlineOnly && psState.includeOnline) notes.push(h('div', { class: 'note info', html: INFO_ICON }, h('div', {}, `${plural(r.onlineOnly, 'fil', 'filer')} lastes ned fra skyen først.`)));
-  modal([
-    h('h3', { html: PS_ICON + `Fant ${plural(r.count, 'bilde eller video', 'bilder og videoer')}` }),
-    h('p', {}, `I ${plural(r.folders, 'mappe', 'mapper')}, til sammen ${fmtSize(r.bytes)}. De flyttes til ${r.dest.replace(S.places.home, '~')}, sortert i År › Måned.`),
-    table,
-    ...notes,
-    h('p', { style: 'font-size:12px' }, 'Tips: Ta gjerne en sikkerhetskopi (Time Machine) før første gang.'),
-  ], [
-    h('button', { class: 'btn', onclick: closeModal }, 'Avbryt'),
-    h('button', { class: 'btn accent', disabled: !toMove, onclick: psRun }, `Flytt ${plural(toMove, 'fil', 'filer')}`),
-  ]);
+  const disk = r.onlineOnly ? await fx.diskInfo('/') : null;
+  const render = () => {
+    const include = psState.includeOnline;
+    const local = r.count - r.onlineOnly;
+    const toMove = include ? r.count : local;
+    const table = h('table', { class: 'summary-table' });
+    for (const [k, v] of Object.entries(r.byProvider).sort((a, b) => b[1] - a[1])) table.append(h('tr', {}, h('td', {}, k), h('td', {}, plural(v, 'fil', 'filer'))));
+    const fromCloud = Object.entries(r.byProvider).filter(([k]) => k !== 'Denne Macen').reduce((a, [, v]) => a + v, 0);
+    const notes = [];
+    if (fromCloud) notes.push(h('div', { class: 'note warn', html: WARN_ICON }, h('div', {},
+      h('b', {}, `${plural(fromCloud, 'fil', 'filer')} ligger i skylagring. `),
+      'Når de flyttes til All Photos, fjernes de fra skyen og fra andre enheter, men blir liggende trygt på denne Macen.')));
+    if (r.onlineOnly) {
+      const all = r.onlineOnly === r.count;
+      const lead = all
+        ? `Alle ${plural(r.count, 'filen', 'filene')} ligger bare i skyen, ikke på Macen. `
+        : `${plural(r.onlineOnly, 'fil', 'filer')} ligger bare i skyen, ikke på Macen. `;
+      const tail = include
+        ? `De lastes ned først (${fmtSize(r.onlineBytes)}). Det kan ta en stund.`
+        : `De må lastes ned (${fmtSize(r.onlineBytes)}) før de kan flyttes, og hoppes derfor over hvis du ikke krysser av nedenfor.`;
+      notes.push(h('div', { class: 'note info', html: INFO_ICON }, h('div', {}, h('b', {}, lead), tail)));
+      const cb = h('input', { type: 'checkbox', checked: include });
+      cb.addEventListener('change', () => { psState.includeOnline = cb.checked; render(); });
+      notes.push(h('label', { class: 'check' }, cb, h('div', {}, `Last ned og flytt også bildene som bare ligger i skyen (${fmtSize(r.onlineBytes)})`)));
+      if (include && disk && disk.free < r.onlineBytes * 1.1) {
+        notes.push(h('div', { class: 'note warn', html: WARN_ICON }, h('div', {}, h('b', {}, 'Lite ledig plass. '),
+          `Macen har ${fmtSize(disk.free)} ledig, men nedlastingen krever omtrent ${fmtSize(r.onlineBytes)}.`)));
+      }
+    }
+    modal([
+      h('h3', { html: PS_ICON + `Fant ${plural(r.count, 'bilde eller video', 'bilder og videoer')}` }),
+      h('p', {}, `I ${plural(r.folders, 'mappe', 'mapper')}, til sammen ${fmtSize(r.bytes)}. De flyttes til ${r.dest.replace(S.places.home, '~')}, sortert i År › Måned.`),
+      table,
+      ...notes,
+      h('p', { style: 'font-size:12px' }, 'Tips: Ta gjerne en sikkerhetskopi (Time Machine) før første gang.'),
+    ], [
+      h('button', { class: 'btn', onclick: closeModal }, 'Avbryt'),
+      toMove
+        ? h('button', { class: 'btn accent', onclick: psRun }, include && r.onlineOnly ? `Last ned og flytt ${plural(toMove, 'fil', 'filer')}` : `Flytt ${plural(toMove, 'fil', 'filer')}`)
+        : h('button', { class: 'btn accent', disabled: true }, 'Ingen filer å flytte'),
+    ]);
+  };
+  render();
 }
 
 let psProgressHandler = null;

@@ -75,14 +75,14 @@ async function scan(opts, onProgress) {
     }
   }
   const byProvider = {};
-  let onlineOnly = 0, bytes = 0;
+  let onlineOnly = 0, bytes = 0, onlineBytes = 0;
   for (const f of files) {
     const key = f.provider || 'Denne Macen';
     byProvider[key] = (byProvider[key] || 0) + 1;
-    if (f.onlineOnly) onlineOnly++;
+    if (f.onlineOnly) { onlineOnly++; onlineBytes += f.size; }
     bytes += f.size;
   }
-  return { files, folders: folders.size, byProvider, onlineOnly, bytes, dest: DEST };
+  return { files, folders: folders.size, byProvider, onlineOnly, onlineBytes, bytes, dest: DEST };
 }
 
 // ---------- Datoer ----------
