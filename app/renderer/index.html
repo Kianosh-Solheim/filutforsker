@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="nb">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'">
+  <title>Filutforsker</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="app">
+    <header id="titlebar">
+      <div id="tabs" role="tablist"></div>
+      <button id="new-tab" class="icon-btn small" title="Ny fane (⌘T)"></button>
+      <div class="drag-fill"></div>
+    </header>
+
+    <div id="navbar">
+      <div class="nav-buttons">
+        <button id="btn-back" class="icon-btn" title="Tilbake (⌘[)"></button>
+        <button id="btn-forward" class="icon-btn" title="Fremover (⌘])"></button>
+        <button id="btn-up" class="icon-btn" title="Opp ett nivå (⌘↑)"></button>
+        <button id="btn-refresh" class="icon-btn" title="Oppdater (⌘R)"></button>
+      </div>
+      <div id="address" tabindex="-1">
+        <div id="crumbs"></div>
+        <input id="address-input" spellcheck="false" autocomplete="off">
+      </div>
+      <div id="searchbox">
+        <span class="search-icon"></span>
+        <input id="search-input" placeholder="Søk" spellcheck="false" autocomplete="off">
+        <button id="search-clear" class="icon-btn tiny" title="Tøm søk"></button>
+      </div>
+    </div>
+
+    <div id="commandbar">
+      <button class="cmd primary" data-cmd="new-menu"><span class="ic" data-icon="newItem"></span><span>Ny</span><span class="ic caret" data-icon="chevronDown"></span></button>
+      <div class="sep"></div>
+      <button class="cmd icon-only" data-cmd="cut" title="Klipp ut (⌘X)"><span class="ic" data-icon="cut"></span></button>
+      <button class="cmd icon-only" data-cmd="copy" title="Kopier (⌘C)"><span class="ic" data-icon="copy"></span></button>
+      <button class="cmd icon-only" data-cmd="paste" title="Lim inn (⌘V)"><span class="ic" data-icon="paste"></span></button>
+      <button class="cmd icon-only" data-cmd="rename" title="Gi nytt navn (F2)"><span class="ic" data-icon="rename"></span></button>
+      <button class="cmd icon-only" data-cmd="delete" title="Flytt til papirkurven (⌘⌫)"><span class="ic" data-icon="trash"></span></button>
+      <div class="sep"></div>
+      <button class="cmd" data-cmd="sort-menu"><span class="ic" data-icon="sort"></span><span>Sorter</span><span class="ic caret" data-icon="chevronDown"></span></button>
+      <button class="cmd" data-cmd="view-menu"><span class="ic" data-icon="view"></span><span>Vis</span><span class="ic caret" data-icon="chevronDown"></span></button>
+      <div class="sep cloud-only"></div>
+      <button class="cmd cloud-only" data-cmd="download" title="Last ned valgte elementer til denne Macen"><span class="ic" data-icon="cloudDown"></span><span>Last ned</span></button>
+      <button class="cmd cloud-only" data-cmd="evict" title="Behold bare i skyen og frigjør plass på Macen"><span class="ic" data-icon="cloudFree"></span><span>Frigjør plass</span></button>
+      <div class="sep"></div>
+      <button class="cmd" data-cmd="photo-sort" title="Samle og sorter bilder i All Photos (⇧⌘B)"><span class="ic" data-icon="photos"></span><span>Sorter bilder</span></button>
+      <button class="cmd icon-only" data-cmd="more-menu" title="Se mer"><span class="ic" data-icon="more"></span></button>
+      <div class="spacer"></div>
+      <button class="cmd" data-cmd="toggle-details" id="btn-details" title="Detaljrute (⌥⌘P)"><span class="ic" data-icon="details"></span><span>Detaljer</span></button>
+    </div>
+
+    <main id="body">
+      <nav id="sidebar"></nav>
+      <div id="splitter-left" class="splitter"></div>
+      <section id="content" tabindex="0">
+        <div id="update-bar" hidden></div>
+        <div id="view"></div>
+        <div id="empty" hidden></div>
+      </section>
+      <aside id="details-pane" hidden></aside>
+    </main>
+
+    <footer id="statusbar">
+      <span id="status-left"></span>
+      <span id="status-cloud"></span>
+      <div class="spacer"></div>
+      <button class="icon-btn tiny" id="sb-details" title="Detaljer"></button>
+      <button class="icon-btn tiny" id="sb-tiles" title="Store ikoner"></button>
+    </footer>
+  </div>
+
+  <div id="menu-layer" hidden></div>
+  <div id="modal-layer" hidden></div>
+  <div id="toast" hidden></div>
+
+  <script src="icons.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

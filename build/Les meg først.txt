@@ -1,0 +1,17 @@
+FILUTFORSKER – slik installerer du
+
+1. Dra «Filutforsker» over på «Programmer»-mappen i dette vinduet.
+2. Åpne Programmer-mappen og dobbeltklikk på Filutforsker.
+3. Første gang sier macOS at appen ikke kan bekreftes, fordi den ikke er fra App Store.
+   Trykk «Ferdig» (ikke «Flytt til papirkurven»).
+4. Åpne Systeminnstillinger › Personvern og sikkerhet.
+   Bla ned til meldingen om Filutforsker og trykk «Åpne likevel». Skriv inn passordet.
+5. Nå åpner appen seg. Trykk «Tillat» når den spør om tilgang til mapper.
+
+Dette trengs bare første gang.
+
+SORTER BILDER
+Knappen «Sorter bilder» samler bilder og videoer i mappen «All Photos» i hjemmemappen,
+sortert etter år og måned. Duplikater legges i en egen mappe. Ingenting slettes.
+Bilder som flyttes ut av iCloud Drive, OneDrive, Google Drive eller Dropbox forsvinner fra skyen
+(men ligger trygt på Macen). Ta gjerne en sikkerhetskopi før første gang.

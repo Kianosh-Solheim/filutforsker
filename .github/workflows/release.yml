@@ -1,0 +1,49 @@
+name: Utgivelse
+
+# Kjører når du pusher en versjons-tag, f.eks.:  git tag v1.1.1 && git push origin v1.1.1
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Sjekk at taggen stemmer med app/package.json
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          APPV="$(node -p "require('./app/package.json').version")"
+          if [ "$TAG" != "$APPV" ]; then
+            echo "::error::Taggen ($GITHUB_REF_NAME) må være lik versjonen i app/package.json ($APPV)."
+            exit 1
+          fi
+
+      - name: Sjekk JavaScript-syntaks
+        run: |
+          for f in app/*.js app/renderer/*.js bootstrap/*.js; do node --check "$f"; done
+
+      - name: Installer byggeverktøy
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q xorriso zip unzip
+          curl -fsSL -o rc.tgz "https://github.com/indygreg/apple-platform-rs/releases/download/apple-codesign%2F0.29.0/apple-codesign-0.29.0-x86_64-unknown-linux-musl.tar.gz"
+          echo "dbe85cedd8ee4217b64e9a0e4c2aef92ab8bcaaa41f20bde99781ff02e600002  rc.tgz" | sha256sum -c -
+          tar xzf rc.tgz
+          sudo install -m 755 apple-codesign-0.29.0-x86_64-unknown-linux-musl/rcodesign /usr/local/bin/rcodesign
+
+      - name: Bygg DMG og oppdateringspakke
+        run: bash build/make-dmg.sh
+
+      - name: Publiser utgivelsen
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            out/Filutforsker.dmg out/filutforsker-app.zip out/filutforsker-app.zip.sha256 \
+            --title "Filutforsker ${GITHUB_REF_NAME#v}" \
+            --notes-file out/notes.md
