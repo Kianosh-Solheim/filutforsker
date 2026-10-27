@@ -21,17 +21,18 @@ Etter det oppdaterer appen seg selv. Terminal-kommandoen trengs ikke ved oppdate
 1. Gjør endringene i `app/`.
 2. Øk `version` i `app/package.json` (f.eks. `1.1.0` → `1.1.1`).
 3. Skriv hva som er nytt under en ny overskrift `## 1.1.1` øverst i `CHANGELOG.md`.
-4. Commit, lag tag og push:
+4. Commit og push til `main`:
 
    ```
    git commit -am "Versjon 1.1.1"
-   git tag v1.1.1
-   git push origin main v1.1.1
+   git push
    ```
 
-GitHub Actions bygger da `Filutforsker.dmg` og oppdateringspakken og publiserer dem som en utgivelse. Appen ser etter oppdateringer ved oppstart og hver sjette time, og viser «Oppdater nå» når en ny versjon finnes. Følg med under **Actions** i repositoriet; bygget tar noen minutter.
+5. Gå til **Actions › Utgivelse › Run workflow** på GitHub og trykk den grønne knappen. (Alternativt: push en tag, `git tag v1.1.1 && git push origin v1.1.1`.)
 
-Taggen må være lik versjonen i `app/package.json`, ellers stopper bygget.
+GitHub Actions bygger da `Filutforsker.dmg` og oppdateringspakken og publiserer dem som en utgivelse med tag `v<versjon>`. Appen ser etter oppdateringer ved oppstart og hver sjette time, og viser «Oppdater nå» når en ny versjon finnes. Følg med under **Actions** i repositoriet; bygget tar noen minutter.
+
+Versjonen hentes fra `app/package.json`. Kjøres bygget på nytt for samme versjon, erstattes filene i den eksisterende utgivelsen.
 
 ## Hvordan oppdateringene virker
 

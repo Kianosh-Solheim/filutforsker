@@ -1,7 +1,10 @@
 name: Utgivelse
 
-# Kjører når du pusher en versjons-tag, f.eks.:  git tag v1.1.1 && git push origin v1.1.1
+# Starter på to måter:
+#  1. Actions › Utgivelse › «Run workflow» (versjonen hentes fra app/package.json)
+#  2. Push en versjons-tag:  git tag v1.1.1 && git push origin v1.1.1
 on:
+  workflow_dispatch:
   push:
     tags: ['v*']
 
@@ -14,14 +17,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Sjekk at taggen stemmer med app/package.json
+      - name: Finn versjon
         run: |
-          TAG="${GITHUB_REF_NAME#v}"
           APPV="$(node -p "require('./app/package.json').version")"
-          if [ "$TAG" != "$APPV" ]; then
-            echo "::error::Taggen ($GITHUB_REF_NAME) må være lik versjonen i app/package.json ($APPV)."
-            exit 1
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            if [ "${GITHUB_REF_NAME#v}" != "$APPV" ]; then
+              echo "::error::Taggen ($GITHUB_REF_NAME) må være lik versjonen i app/package.json ($APPV)."
+              exit 1
+            fi
           fi
+          echo "TAG=v$APPV" >> "$GITHUB_ENV"
+          echo "VERSION=$APPV" >> "$GITHUB_ENV"
 
       - name: Sjekk JavaScript-syntaks
         run: |
@@ -43,7 +49,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" \
-            out/Filutforsker.dmg out/filutforsker-app.zip out/filutforsker-app.zip.sha256 \
-            --title "Filutforsker ${GITHUB_REF_NAME#v}" \
-            --notes-file out/notes.md
+          FILES="out/Filutforsker.dmg out/filutforsker-app.zip out/filutforsker-app.zip.sha256"
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            gh release upload "$TAG" $FILES --clobber
+            gh release edit "$TAG" --title "Filutforsker $VERSION" --notes-file out/notes.md --latest
+          else
+            gh release create "$TAG" $FILES --target "$GITHUB_SHA" --title "Filutforsker $VERSION" --notes-file out/notes.md --latest
+          fi
