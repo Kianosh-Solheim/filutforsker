@@ -441,6 +441,19 @@ ipcMain.handle('ps-run', async (e, opts) => {
 });
 ipcMain.handle('ps-cancel', async () => photosort.cancel());
 
+// ---------- IPC: galleri ----------
+
+ipcMain.handle('gallery-scan', async (e) => {
+  try {
+    const r = await photosort.scan({ scope: 'mac', includeDest: true }, (p) => { if (!e.sender.isDestroyed()) e.sender.send('gallery-progress', p); });
+    return { files: r.files, dest: r.dest };
+  } catch (err) { return { error: err.message }; }
+});
+ipcMain.handle('gallery-move', async (e, paths) => {
+  const files = await photosort.describe(paths);
+  return photosort.run(files, { includeOnline: true }, (p) => { if (!e.sender.isDestroyed()) e.sender.send('gallery-progress', p); });
+});
+
 ipcMain.handle('confirm', async (e, opts) => {
   const win = BrowserWindow.fromWebContents(e.sender);
   const r = await dialog.showMessageBox(win, { type: 'warning', buttons: opts.buttons || ['OK', 'Avbryt'], defaultId: 0, cancelId: 1, message: opts.message, detail: opts.detail || '' });

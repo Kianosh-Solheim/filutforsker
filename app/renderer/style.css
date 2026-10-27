@@ -462,3 +462,53 @@ svg { display: block; }
 #update-bar .progress { margin: 0; width: 180px; flex: none; }
 #update-bar .btn { height: 28px; padding: 0 12px; }
 .notes { white-space: pre-wrap; line-height: 1.5; color: var(--text-2); max-height: 50vh; overflow: auto; user-select: text; margin-top: 8px; }
+
+/* ---------- Oppdateringsknapp i statuslinjen ---------- */
+.sb-btn {
+  height: 22px; border: 0; background: transparent; color: var(--text-2); display: inline-flex; align-items: center; gap: 6px;
+  border-radius: 4px; padding: 0 8px; font-size: 12px; margin-right: 6px;
+}
+.sb-btn svg { width: 13px; height: 13px; }
+.sb-btn:hover { background: var(--hover); color: var(--text); }
+.sb-btn.available { color: var(--accent); font-weight: 600; }
+
+/* ---------- Galleri ---------- */
+.gal-bar {
+  position: sticky; top: 0; z-index: 3; display: flex; align-items: center; gap: 8px; padding: 10px 16px;
+  background: var(--content); border-bottom: 1px solid var(--stroke);
+}
+.gal-bar .spacer { flex: 1; }
+.gal-bar .btn { height: 30px; }
+.gal-selinfo { color: var(--text-2); margin-right: 2px; }
+.chip { height: 30px; padding: 0 12px; border-radius: 15px; border: 1px solid var(--stroke-2); background: transparent; display: inline-flex; align-items: center; gap: 4px; }
+.chip:hover { background: var(--hover); }
+.chip .chip-n { color: var(--text-3); font-size: 12px; }
+.chip.on { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+.chip.on .chip-n { color: inherit; opacity: .8; }
+.gal-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(168px, 1fr)); gap: 8px; padding: 14px 16px 24px; }
+.gtile { border-radius: 8px; padding: 6px; border: 1px solid transparent; position: relative; min-width: 0; }
+.gtile:hover { background: var(--hover); }
+.gtile.selected { background: var(--sel); border-color: var(--sel-stroke); }
+.gtile.cut { opacity: .5; }
+.gthumb { aspect-ratio: 1; border-radius: 6px; overflow: hidden; background: var(--surface); display: grid; place-items: center; position: relative; }
+.gthumb > span:first-child { width: 100%; height: 100%; display: grid; place-items: center; }
+.gthumb .ic-holder svg { width: 64px; height: 64px; }
+.gthumb img { width: 100%; height: 100%; object-fit: cover; box-shadow: none; border-radius: 0; }
+.gbadge { position: absolute; top: 7px; right: 7px; width: 26px; height: 26px; filter: drop-shadow(0 1px 2px rgba(0,0,0,.35)); }
+.gbadge svg, .gcheck svg, .gplay svg { width: 100%; height: 100%; }
+.gcheck { position: absolute; top: 7px; left: 7px; width: 24px; height: 24px; opacity: 0; transition: opacity .1s; }
+.gtile:hover .gcheck { opacity: .9; }
+.gtile.selected .gcheck { opacity: 1; }
+.gtile.selected .gcheck circle { fill: var(--accent); stroke: #fff; }
+.gplay { position: absolute; left: 50%; top: 50%; width: 36px; height: 36px; transform: translate(-50%, -50%); pointer-events: none; }
+.gcloud { position: absolute; bottom: 8px; left: 8px; width: 22px; height: 22px; background: var(--content); border-radius: 50%; padding: 3px; }
+.gcloud svg { width: 16px; height: 16px; }
+.gmove {
+  position: absolute; bottom: 7px; right: 7px; height: 26px; padding: 0 12px; border-radius: 13px; border: 0;
+  background: var(--accent); color: var(--accent-text); font-size: 12px; font-weight: 600; box-shadow: 0 1px 4px rgba(0,0,0,.35);
+}
+.gmove:hover { filter: brightness(1.08); }
+.gname { font-size: 12px; margin-top: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 0 2px; }
+.gwhere { font-size: 11px; color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 0 2px; }
+.gal-more { text-align: center; color: var(--text-3); padding: 10px 0 40px; }
+.gal-empty { text-align: center; color: var(--text-2); padding: 60px 20px; }

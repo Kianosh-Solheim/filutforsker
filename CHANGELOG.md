@@ -2,6 +2,14 @@
 
 Hver versjon har en overskrift `## x.y.z`. Teksten under vises i appen når far trykker «Hva er nytt».
 
+## 1.2.0
+
+- Nytt: Galleri. Viser alle bilder og videoer på Macen og i iCloud Drive, OneDrive, Google Drive og Dropbox.
+  - Bilder som ligger i All Photos har et grønt merke. De andre har en «Flytt»-knapp.
+  - Søk etter navn eller mappe, og filtrer på Alle, Ikke flyttet eller Flyttet.
+  - Velg flere bilder med klikk, ⌘-klikk, ⇧-klikk, avkrysningsrundingen eller ved å dra over dem, og flytt alle med «Flytt valgte».
+- Ny knapp «Se etter oppdateringer» nederst til høyre i vinduet.
+
 ## 1.1.1
 
 - «Sorter bilder» forklarer nå tydelig når bilder bare ligger i skyen, og viser hvor mye som må lastes ned.

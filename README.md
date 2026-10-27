@@ -1,6 +1,6 @@
 # Filutforsker
 
-Filutforsker i Windows 11-stil for Mac (Apple Silicon), med synkroniseringsstatus for iCloud Drive, OneDrive, Google Drive og Dropbox, og en «Sorter bilder»-funksjon som samler bilder i `~/All Photos/År/Måned`.
+Filutforsker i Windows 11-stil for Mac (Apple Silicon), med synkroniseringsstatus for iCloud Drive, OneDrive, Google Drive og Dropbox, en «Sorter bilder»-funksjon som samler bilder i `~/All Photos/År/Måned`, og et galleri som viser alle bilder på Macen og hvilke som er flyttet.
 
 Appen er bygget på Electron. Grensesnittet er på norsk.
 

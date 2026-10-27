@@ -25,10 +25,10 @@ function isMedia(name) {
   return i > 0 && EXT.has(name.slice(i + 1).toLowerCase());
 }
 
-function shouldSkipDir(p, name, roots) {
+function shouldSkipDir(p, name, roots, includeDest) {
   if (name.startsWith('.')) return true;
   if (name.endsWith('.photoslibrary') || name.endsWith('.app') || name.endsWith('.photolibrary')) return true;
-  if (p === DEST) return true;
+  if (p === DEST && !includeDest) return true;
   const lib = path.join(HOME, 'Library');
   if (p === lib) return true; // skytjenestene i Library legges til som egne startpunkter
   if (p.startsWith(lib + path.sep) && !roots.some(r => p === r.path || p.startsWith(r.path + path.sep))) return true;
@@ -61,14 +61,15 @@ async function scan(opts, onProgress) {
     for (const e of ents) {
       const p = path.join(dir, e.name);
       if (e.isDirectory()) {
-        if (!shouldSkipDir(p, e.name, roots)) stack.push(p);
+        if (!shouldSkipDir(p, e.name, roots, opts.includeDest)) stack.push(p);
       } else if (e.isFile() && !e.name.startsWith('.') && isMedia(e.name)) {
-        if (p.startsWith(DEST + path.sep)) continue;
+        const inDest = p.startsWith(DEST + path.sep);
+        if (inDest && !opts.includeDest) continue;
         let st;
         try { st = await fs.promises.stat(p); } catch { continue; }
         const prov = cloud.providerFor(p, roots);
         const onlineOnly = !!prov && st.size > 0 && st.blocks === 0;
-        files.push({ path: p, size: st.size, birth: st.birthtimeMs, mtime: st.mtimeMs, provider: prov ? prov.label : null, onlineOnly });
+        files.push({ path: p, name: e.name, size: st.size, blocks: st.blocks, birth: st.birthtimeMs, mtime: st.mtimeMs, provider: prov ? prov.label : null, onlineOnly, moved: inDest });
         folders.add(dir);
       }
       if (++seen % 500 === 0) onProgress && onProgress({ phase: 'scan', found: files.length, dir });
@@ -142,6 +143,21 @@ async function moveFile(src, dst) {
   }
 }
 
+// Lag fil-objekter for enkeltfiler valgt i galleriet.
+async function describe(paths) {
+  const roots = cloud.cloudRoots();
+  const out = [];
+  for (const p of paths) {
+    try {
+      const st = await fs.promises.stat(p);
+      if (!st.isFile() || p.startsWith(DEST + path.sep)) continue;
+      const prov = cloud.providerFor(p, roots);
+      out.push({ path: p, size: st.size, birth: st.birthtimeMs, mtime: st.mtimeMs, provider: prov ? prov.label : null, onlineOnly: !!prov && st.size > 0 && st.blocks === 0 });
+    } catch {}
+  }
+  return out;
+}
+
 async function run(files, opts, onProgress) {
   cancelled = false;
   await fs.promises.mkdir(path.join(DEST, 'Duplicates'), { recursive: true });
@@ -152,6 +168,7 @@ async function run(files, opts, onProgress) {
 
   const todo = files.filter(f => opts.includeOnline || !f.onlineOnly);
   let moved = 0, dups = 0, failed = [], skipped = files.length - todo.length;
+  const moves = [];
   const BATCH = 100;
   for (let i = 0; i < todo.length; i += BATCH) {
     if (cancelled) break;
@@ -179,6 +196,7 @@ async function run(files, opts, onProgress) {
         const out = await uniqueTarget(targetDir, path.basename(f.path));
         await moveFile(f.path, out);
         await fs.promises.appendFile(logFile, `${f.path} -> ${out}\n`);
+        moves.push({ from: f.path, to: out });
         moved++;
       } catch (e) {
         failed.push({ path: f.path, error: e.message });
@@ -186,7 +204,7 @@ async function run(files, opts, onProgress) {
     }
   }
   onProgress && onProgress({ phase: 'move', done: todo.length, total: todo.length });
-  return { moved, dups, failed, skipped, cancelled, dest: DEST };
+  return { moved, dups, failed, skipped, cancelled, moves, dest: DEST };
 }
 
-module.exports = { scan, run, cancel, DEST, isMedia };
+module.exports = { scan, run, describe, cancel, DEST, isMedia };
