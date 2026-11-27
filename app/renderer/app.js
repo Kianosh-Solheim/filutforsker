@@ -1338,10 +1338,15 @@ async function psSummary(r) {
     const toMove = include ? r.count : local;
     const table = h('table', { class: 'summary-table' });
     for (const [k, v] of Object.entries(r.byProvider).sort((a, b) => b[1] - a[1])) table.append(h('tr', {}, h('td', {}, k), h('td', {}, plural(v, 'fil', 'filer'))));
-    const fromCloud = Object.entries(r.byProvider).filter(([k]) => k !== 'Denne Macen').reduce((a, [, v]) => a + v, 0);
+    const isOneDrive = (k) => /^OneDrive/i.test(k);
+    const fromOneDrive = Object.entries(r.byProvider).filter(([k]) => isOneDrive(k)).reduce((a, [, v]) => a + v, 0);
+    const fromCloud = Object.entries(r.byProvider).filter(([k]) => k !== 'Denne Macen' && !isOneDrive(k)).reduce((a, [, v]) => a + v, 0);
     const notes = [];
+    if (fromOneDrive) notes.push(h('div', { class: 'note info', html: INFO_ICON }, h('div', {},
+      h('b', {}, `${plural(fromOneDrive, 'bilde', 'bilder')} fra OneDrive kopieres. `),
+      'Originalene samles i OneDrive-mappen «Flyttet til All Photos» og tar ikke plass på Macen. Slett den mappen på onedrive.com når du har sjekket at alt er i orden.')));
     if (fromCloud) notes.push(h('div', { class: 'note warn', html: WARN_ICON }, h('div', {},
-      h('b', {}, `${plural(fromCloud, 'fil', 'filer')} ligger i skylagring. `),
+      h('b', {}, `${plural(fromCloud, 'fil', 'filer')} ligger i ${fromOneDrive ? 'annen ' : ''}skylagring. `),
       'Når de flyttes til All Photos, fjernes de fra skyen og fra andre enheter, men blir liggende trygt på denne Macen.')));
     if (r.onlineOnly) {
       const all = r.onlineOnly === r.count;
@@ -1391,12 +1396,16 @@ async function psRun() {
   const lines = [`Flyttet ${plural(r.moved || 0, 'bilde', 'bilder')} til All Photos.`];
   if (r.dups) lines.push(`${plural(r.dups, 'duplikat', 'duplikater')} lagt i Duplicates (ingenting er slettet).`);
   if (r.skipped) lines.push(`${plural(r.skipped, 'bilde', 'bilder')} som bare ligger i skyen ble hoppet over.`);
+  if (r.stashed) lines.push(`${plural(r.stashed, 'original', 'originaler')} fra OneDrive er lagt i mappen «Flyttet til All Photos» i OneDrive. Slett den på onedrive.com når du har sjekket at alt er i orden.`);
   if (r.cancelled) lines.push('Kjør «Sorter bilder» igjen for å fortsette der den slapp.');
   if (r.error) lines.push(r.error);
   card.finish({
     title: r.cancelled ? 'Sorteringen ble avbrutt' : r.error ? 'Sorteringen stoppet' : 'Bildene er sortert',
     lines, failed: r.failed || [],
-    buttons: [{ label: 'Åpne All Photos', accent: true, action: async () => { S.places = await fx.places(); renderSidebar(); navigate(r.dest); } }],
+    buttons: [
+      ...(r.stashRoots && r.stashRoots.length ? [{ label: 'Vis originalene', action: () => navigate(r.stashRoots[0]) }] : []),
+      { label: 'Åpne All Photos', accent: true, action: async () => { S.places = await fx.places(); renderSidebar(); navigate(r.dest); } },
+    ],
   });
   if (!isVirtual(tab().loc)) load(tab(), { keepSel: true });
 }
@@ -1565,14 +1574,18 @@ async function galleryMove(paths) {
   const g = S.gallery;
   const items = (g.items || []).filter(i => paths.includes(i.path) && !i.moved);
   if (!items.length) return;
-  const inCloud = items.filter(i => i.provider);
+  const fromOneDrive = items.filter(i => i.provider && /^OneDrive/i.test(i.provider));
+  const inCloud = items.filter(i => i.provider && !/^OneDrive/i.test(i.provider));
   const online = items.filter(i => i.onlineOnly);
-  if (inCloud.length) {
+  if (inCloud.length || fromOneDrive.length) {
     const bytes = online.reduce((a, i) => a + (i.size || 0), 0);
     const r = await fx.confirm({
       message: items.length === 1 ? `Flytte «${items[0].name}» til All Photos?` : `Flytte ${items.length} bilder til All Photos?`,
-      detail: `${plural(inCloud.length, 'fil', 'filer')} ligger i skylagring og fjernes fra skyen og andre enheter, men blir liggende trygt på Macen.`
-        + (online.length ? ` ${plural(online.length, 'fil', 'filer')} må lastes ned først (${fmtSize(bytes)}).` : ''),
+      detail: [
+        fromOneDrive.length ? `${plural(fromOneDrive.length, 'bilde', 'bilder')} fra OneDrive kopieres, og originalene samles i OneDrive-mappen «Flyttet til All Photos».` : '',
+        inCloud.length ? `${plural(inCloud.length, 'fil', 'filer')} ligger i annen skylagring og fjernes fra skyen og andre enheter, men blir liggende trygt på Macen.` : '',
+        online.length ? `${plural(online.length, 'fil', 'filer')} må lastes ned først (${fmtSize(bytes)}).` : '',
+      ].filter(Boolean).join(' '),
       buttons: ['Flytt', 'Avbryt'],
     });
     if (r !== 0) return;

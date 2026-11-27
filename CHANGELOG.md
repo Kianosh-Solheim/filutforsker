@@ -2,6 +2,15 @@
 
 Hver versjon har en overskrift `## x.y.z`. Teksten under vises i appen når far trykker «Hva er nytt».
 
+## 1.6.0
+
+- Bilder fra OneDrive kopieres nå til All Photos i stedet for å flyttes. Originalene samles i en egen mappe i OneDrive, «Flyttet til All Photos», med samme mappestruktur som før.
+  - OneDrive spør derfor ikke lenger «Vil du fjerne filene fra OneDrive?».
+  - Originalene settes til «Kun på nett», så de ikke tar plass på Macen.
+  - Når du har sjekket at alt er i orden, sletter du mappen «Flyttet til All Photos» på onedrive.com.
+  - Mappen hoppes over ved senere sorteringer og i Galleriet.
+- Gjelder både «Sorter bilder» og «Flytt» i Galleriet. Andre skytjenester flyttes som før.
+
 ## 1.5.3
 
 - «Oppdater nå» virker nå også mens bilder flyttes fra skyen i bakgrunnen. Før kunne nedlastingen henge.

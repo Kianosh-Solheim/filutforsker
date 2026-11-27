@@ -25,8 +25,15 @@ function isMedia(name) {
   return i > 0 && EXT.has(name.slice(i + 1).toLowerCase());
 }
 
+// Bilder fra disse skytjenestene kopieres i stedet for å flyttes, og originalen legges i STASH innad
+// i tjenesten. OneDrive stopper og spør før det sletter mange filer i skyen; en flytting innad i
+// OneDrive er ikke en sletting, så det spørsmålet unngås.
+const KEEP_IN_CLOUD = new Set(['onedrive']);
+const STASH = 'Flyttet til All Photos';
+
 function shouldSkipDir(p, name, roots, includeDest) {
   if (name.startsWith('.')) return true;
+  if (name === STASH && roots.some(r => r.path === path.dirname(p))) return true;
   if (name.endsWith('.photoslibrary') || name.endsWith('.app') || name.endsWith('.photolibrary')) return true;
   if (p === DEST && !includeDest) return true;
   const lib = path.join(HOME, 'Library');
@@ -69,7 +76,7 @@ async function scan(opts, onProgress) {
         try { st = await fs.promises.stat(p); } catch { continue; }
         const prov = cloud.providerFor(p, roots);
         const onlineOnly = !!prov && st.size > 0 && st.blocks === 0;
-        files.push({ path: p, name: e.name, size: st.size, blocks: st.blocks, birth: st.birthtimeMs, mtime: st.mtimeMs, provider: prov ? prov.label : null, onlineOnly, moved: inDest });
+        files.push({ path: p, name: e.name, size: st.size, blocks: st.blocks, birth: st.birthtimeMs, mtime: st.mtimeMs, provider: prov ? prov.label : null, providerId: prov ? prov.id : null, root: prov ? prov.path : null, onlineOnly, moved: inDest });
         folders.add(dir);
       }
       if (++seen % 500 === 0) onProgress && onProgress({ phase: 'scan', found: files.length, dir });
@@ -174,7 +181,7 @@ async function describe(paths) {
       const st = await fs.promises.stat(p);
       if (!st.isFile() || p.startsWith(DEST + path.sep)) continue;
       const prov = cloud.providerFor(p, roots);
-      out.push({ path: p, size: st.size, birth: st.birthtimeMs, mtime: st.mtimeMs, provider: prov ? prov.label : null, onlineOnly: !!prov && st.size > 0 && st.blocks === 0 });
+      out.push({ path: p, size: st.size, birth: st.birthtimeMs, mtime: st.mtimeMs, provider: prov ? prov.label : null, providerId: prov ? prov.id : null, root: prov ? prov.path : null, onlineOnly: !!prov && st.size > 0 && st.blocks === 0 });
     } catch {}
   }
   return out;
@@ -211,6 +218,17 @@ async function run(files, opts, onProgress) {
     return flushing;
   };
   const flushTimer = setInterval(flush, 2000);
+
+  // Originaler som er lagt til side i skyen, settes til «kun på nett» så de ikke tar plass på Macen.
+  const stashRoots = new Set();
+  let stashedCount = 0;
+  let evictQueue = [], evicting = Promise.resolve();
+  const flushEvict = () => {
+    if (!evictQueue.length) return evicting;
+    const batch = evictQueue; evictQueue = [];
+    evicting = evicting.then(() => cloud.evict(batch).catch(() => {}));
+    return evicting;
+  };
 
   // Datoer fra Spotlight hentes i bolker ved behov.
   const dateChunks = new Map();
@@ -270,9 +288,40 @@ async function run(files, opts, onProgress) {
         }
         await fs.promises.mkdir(targetDir, { recursive: true });
         const out = await uniqueTarget(targetDir, path.basename(f.path));
-        try { await moveFile(f.path, out); } finally { reserved.delete(out); }
-        logBuf.push(`${f.path} -> ${out}`);
-        moves.push({ from: f.path, to: out });
+        if (KEEP_IN_CLOUD.has(f.providerId) && f.root) {
+          // Kopier hit, og legg originalen i en egen mappe innad i skytjenesten.
+          try {
+            await fs.promises.copyFile(f.path, out, fs.constants.COPYFILE_EXCL | fs.constants.COPYFILE_FICLONE);
+            try { await fs.promises.utimes(out, new Date(f.mtime), new Date(f.mtime)); } catch {}
+          } finally { reserved.delete(out); }
+          const rel = path.relative(f.root, f.path);
+          const stashDir = path.join(f.root, STASH, path.dirname(rel));
+          await fs.promises.mkdir(stashDir, { recursive: true });
+          const stashed = await uniqueTarget(stashDir, path.basename(f.path));
+          try { await fs.promises.rename(f.path, stashed); }
+          catch (e) {
+            reserved.delete(stashed);
+            // Kopien er trygg i All Photos; originalen ble bare liggende der den var.
+            failed.push({ path: f.path, error: `Kopiert til All Photos, men originalen kunne ikke legges i «${STASH}»: ${e.message}` });
+            logBuf.push(`${f.path} -> ${out} (kopi)`);
+            moves.push({ from: f.path, to: out, copied: true });
+            moved++;
+            done++;
+            report(f.path);
+            continue;
+          }
+          reserved.delete(stashed);
+          stashRoots.add(path.join(f.root, STASH));
+          stashedCount++;
+          evictQueue.push(stashed);
+          if (evictQueue.length >= 40) flushEvict();
+          logBuf.push(`${f.path} -> ${out} (original lagt i ${stashed})`);
+          moves.push({ from: f.path, to: out, stashed });
+        } else {
+          try { await moveFile(f.path, out); } finally { reserved.delete(out); }
+          logBuf.push(`${f.path} -> ${out}`);
+          moves.push({ from: f.path, to: out });
+        }
         moved++;
       } catch (e) {
         failed.push({ path: f.path, error: e.message });
@@ -287,9 +336,10 @@ async function run(files, opts, onProgress) {
   } finally {
     clearInterval(flushTimer);
     await flush();
+    await flushEvict();
   }
   report(undefined, true);
-  return { moved, dups, failed, skipped, cancelled, moves, dest: DEST };
+  return { moved, dups, failed, skipped, cancelled, moves, dest: DEST, stashed: stashedCount, stashRoots: [...stashRoots] };
 }
 
-module.exports = { scan, run, describe, cancel, DEST, isMedia };
+module.exports = { scan, run, describe, cancel, DEST, isMedia, STASH, KEEP_IN_CLOUD };
