@@ -2,6 +2,11 @@
 
 Hver versjon har en overskrift `## x.y.z`. Teksten under vises i appen når far trykker «Hva er nytt».
 
+## 1.5.3
+
+- «Oppdater nå» virker nå også mens bilder flyttes fra skyen i bakgrunnen. Før kunne nedlastingen henge.
+- Stopper nedlastingen av en oppdatering opp i 60 sekunder, kommer en tydelig feilmelding med «Prøv igjen».
+
 ## 1.5.2
 
 - Filutforsker kan nå brukes som vanlig mens bilder sorteres eller flyttes. Fremdriften vises i et lite kort nederst til høyre i stedet for et vindu som dekker alt.
