@@ -121,12 +121,18 @@ function md5(file) {
   });
 }
 
+// Reserverte målnavn, så parallelle flyttinger aldri velger samme navn (rename overskriver uten å spørre).
+const reserved = new Set();
 async function uniqueTarget(dir, name) {
   const ext = path.extname(name);
   const base = name.slice(0, name.length - ext.length);
   let out = path.join(dir, name), i = 1;
-  while (true) {
-    try { await fs.promises.access(out); } catch { return out; }
+  for (;;) {
+    if (!reserved.has(out)) {
+      let exists = true;
+      try { await fs.promises.lstat(out); } catch { exists = false; }
+      if (!exists && !reserved.has(out)) { reserved.add(out); return out; }
+    }
     out = path.join(dir, `${base}_${i}${ext}`); i++;
   }
 }
@@ -158,8 +164,13 @@ async function describe(paths) {
   return out;
 }
 
+const WORKERS = 8;          // filer som behandles samtidig
+const PREFETCH_AHEAD = 120; // skyfiler som bestilles nedlastet i forkant
+const DATE_CHUNK = 200;     // filer per mdls-kall
+
 async function run(files, opts, onProgress) {
   cancelled = false;
+  reserved.clear();
   await fs.promises.mkdir(path.join(DEST, 'Duplicates'), { recursive: true });
   const hashFile = path.join(DEST, '.hashes');
   const logFile = path.join(DEST, 'move-log.txt');
@@ -167,43 +178,98 @@ async function run(files, opts, onProgress) {
   try { known = new Set((await fs.promises.readFile(hashFile, 'utf8')).split('\n').map(s => s.trim()).filter(Boolean)); } catch {}
 
   const todo = files.filter(f => opts.includeOnline || !f.onlineOnly);
-  let moved = 0, dups = 0, failed = [], skipped = files.length - todo.length;
-  const moves = [];
-  const BATCH = 100;
-  for (let i = 0; i < todo.length; i += BATCH) {
-    if (cancelled) break;
-    const batch = todo.slice(i, i + BATCH);
-    const dates = await mdlsDates(batch.map(f => f.path));
-    for (let j = 0; j < batch.length; j++) {
-      if (cancelled) break;
-      const f = batch[j];
-      onProgress && onProgress({ phase: 'move', done: i + j, total: todo.length, file: f.path });
+  let moved = 0, dups = 0, done = 0;
+  const failed = [], moves = [];
+  const skipped = files.length - todo.length;
+
+  // Logg og sjekksummer skrives i bunker i stedet for én gang per fil.
+  let hashBuf = [], logBuf = [], flushing = Promise.resolve();
+  const flush = () => {
+    if (!hashBuf.length && !logBuf.length) return flushing;
+    const hb = hashBuf, lb = logBuf;
+    hashBuf = []; logBuf = [];
+    flushing = flushing.then(async () => {
+      if (hb.length) await fs.promises.appendFile(hashFile, hb.join('\n') + '\n').catch(() => {});
+      if (lb.length) await fs.promises.appendFile(logFile, lb.join('\n') + '\n').catch(() => {});
+    });
+    return flushing;
+  };
+  const flushTimer = setInterval(flush, 2000);
+
+  // Datoer fra Spotlight hentes i bolker ved behov.
+  const dateChunks = new Map();
+  const dateFor = async (idx) => {
+    const c = Math.floor(idx / DATE_CHUNK);
+    if (!dateChunks.has(c)) dateChunks.set(c, mdlsDates(todo.slice(c * DATE_CHUNK, (c + 1) * DATE_CHUNK).map(f => f.path)));
+    return (await dateChunks.get(c))[idx % DATE_CHUNK];
+  };
+
+  // Be skytjenestene laste ned filene i forkant, så de er klare når vi kommer til dem.
+  let prefetchedTo = 0, prefetching = false;
+  const prefetch = (from) => {
+    if (prefetching || prefetchedTo >= todo.length || prefetchedTo > from + PREFETCH_AHEAD / 2) return;
+    const start = Math.max(prefetchedTo, from);
+    const end = Math.min(todo.length, start + PREFETCH_AHEAD);
+    prefetchedTo = end;
+    const paths = todo.slice(start, end).filter(f => f.onlineOnly).map(f => f.path);
+    if (!paths.length) return;
+    prefetching = true;
+    cloud.download(paths).catch(() => {}).finally(() => { prefetching = false; });
+  };
+
+  let next = 0;
+  let lastReport = 0;
+  const report = (file, force) => {
+    const now = Date.now();
+    if (!force && now - lastReport < 150) return;
+    lastReport = now;
+    onProgress && onProgress({ phase: 'move', done, total: todo.length, file });
+  };
+
+  const worker = async () => {
+    for (;;) {
+      if (cancelled) return;
+      const idx = next++;
+      if (idx >= todo.length) return;
+      const f = todo[idx];
+      prefetch(idx);
+      report(f.path);
       try {
         await fs.promises.access(f.path);
         // Spotlight-datoen (når bildet ble tatt) først; ellers den eldste av opprettet/endret,
         // siden kopiering ofte nullstiller opprettelsesdatoen.
         const fsDates = [f.birth, f.mtime].filter(x => x && x > 0);
-        const d = dates[j] || new Date(fsDates.length ? Math.min(...fsDates) : Date.now());
+        const d = (await dateFor(idx)) || new Date(fsDates.length ? Math.min(...fsDates) : Date.now());
         const h = await md5(f.path); // leser fila, så skyfiler lastes ned før flytting
         let targetDir;
+        // Sjekk og registrering skjer uten await imellom, så to like filer ikke begge slipper gjennom.
         if (h && known.has(h)) { targetDir = path.join(DEST, 'Duplicates'); dups++; }
         else {
           const [y, m] = ym(d);
           targetDir = path.join(DEST, y, m);
-          if (h) { known.add(h); await fs.promises.appendFile(hashFile, h + '\n'); }
+          if (h) { known.add(h); hashBuf.push(h); }
         }
         await fs.promises.mkdir(targetDir, { recursive: true });
         const out = await uniqueTarget(targetDir, path.basename(f.path));
-        await moveFile(f.path, out);
-        await fs.promises.appendFile(logFile, `${f.path} -> ${out}\n`);
+        try { await moveFile(f.path, out); } finally { reserved.delete(out); }
+        logBuf.push(`${f.path} -> ${out}`);
         moves.push({ from: f.path, to: out });
         moved++;
       } catch (e) {
         failed.push({ path: f.path, error: e.message });
       }
+      done++;
+      report(f.path);
     }
+  };
+
+  try {
+    await Promise.all(Array.from({ length: Math.min(WORKERS, todo.length || 1) }, worker));
+  } finally {
+    clearInterval(flushTimer);
+    await flush();
   }
-  onProgress && onProgress({ phase: 'move', done: todo.length, total: todo.length });
+  report(undefined, true);
   return { moved, dups, failed, skipped, cancelled, moves, dest: DEST };
 }
 

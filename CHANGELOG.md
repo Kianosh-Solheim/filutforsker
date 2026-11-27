@@ -2,6 +2,14 @@
 
 Hver versjon har en overskrift `## x.y.z`. Teksten under vises i appen når far trykker «Hva er nytt».
 
+## 1.5.1
+
+- «Sorter bilder» og flytting fra Galleriet går mye raskere:
+  - 8 bilder behandles samtidig i stedet for ett og ett.
+  - Bilder som bare ligger i skyen, bestilles nedlastet i forkant, mens tidligere bilder flyttes.
+  - Loggen skrives i bunker i stedet for etter hvert bilde.
+- Avbryter du en sortering og starter på nytt, fortsetter den der den slapp. Duplikatsjekken husker alt som allerede er flyttet.
+
 ## 1.5.0
 
 - Nytt: Fremdrift i menylinjen øverst på skjermen. Mens filer kopieres, flyttes eller slettes, eller bilder sorteres, vises et lite ikon med en ring som fylles og prosent ved siden av.
