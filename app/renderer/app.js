@@ -1282,6 +1282,7 @@ const INFO_ICON = '<svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="7" fill="#0
 
 let psState = null;
 function openPhotoSort() {
+  if (S.sortRunning) { toast('En bildeflytting pågår allerede. Vent til den er ferdig, eller avbryt den nederst til høyre.'); return; }
   const t = tab();
   const dir = currentDir();
   const scopeDefault = dir ? 'folder' : 'mac';
@@ -1377,34 +1378,75 @@ async function psSummary(r) {
 
 let psProgressHandler = null;
 async function psRun() {
-  const bar = h('div');
-  const status = h('div', { class: 'mono' });
-  const count = h('p', {}, 'Forbereder …');
-  modal([h('h3', { html: PS_ICON + 'Flytter bilder …' }), count, h('div', { class: 'progress' }, bar), status],
-    [h('button', { class: 'btn', onclick: () => { fx.psCancel(); count.textContent = 'Avbryter …'; } }, 'Avbryt')]);
-  psProgressHandler = (p) => {
-    if (p.phase !== 'move') return;
-    bar.style.width = `${p.total ? Math.round(p.done / p.total * 100) : 100}%`;
-    count.textContent = `${p.done.toLocaleString('nb-NO')} av ${p.total.toLocaleString('nb-NO')} filer`;
-    if (p.file) status.textContent = p.file.replace(S.places.home, '~');
-  };
-  const r = await fx.psRun({ includeOnline: psState.includeOnline });
+  // Fremdriften vises i et lite kort nederst til høyre, så resten av appen kan brukes imens.
+  closeModal();
+  S.sortRunning = true;
+  const card = taskCard({ title: 'Sorterer bilder til All Photos', sub: 'Du kan bruke Filutforsker som vanlig imens.', onCancel: () => fx.psCancel() });
+  psProgressHandler = (p) => { if (p.phase === 'move') card.update(p); };
+  let r;
+  try { r = await fx.psRun({ includeOnline: psState.includeOnline }); }
+  catch (e) { r = { error: cleanErr(e), moved: 0, failed: [] }; }
   psProgressHandler = null;
-  const body = [
-    h('h3', { html: PS_ICON + (r.cancelled ? 'Avbrutt' : 'Ferdig!') }),
-    h('p', {}, `Flyttet ${plural(r.moved || 0, 'fil', 'filer')} til All Photos.`),
-  ];
-  if (r.dups) body.push(h('p', {}, `${plural(r.dups, 'duplikat', 'duplikater')} ble lagt i mappen Duplicates (ingenting er slettet).`));
-  if (r.skipped) body.push(h('p', {}, `${plural(r.skipped, 'fil', 'filer')} som bare ligger i skyen ble hoppet over.`));
-  body.push(h('p', {}, 'En liste over hvor hver fil kom fra, ligger i move-log.txt.'));
-  if (r.failed && r.failed.length) body.push(h('div', { class: 'note warn', html: WARN_ICON }, h('div', {}, h('b', {}, `${plural(r.failed.length, 'fil', 'filer')} kunne ikke flyttes:`),
-    h('div', { class: 'fail-list' }, r.failed.slice(0, 20).map(f => h('div', {}, `${basename(f.path)}: ${f.error}`))))));
-  if (r.error) body.push(h('p', {}, r.error));
-  modal(body, [
-    h('button', { class: 'btn', onclick: closeModal }, 'Lukk'),
-    h('button', { class: 'btn accent', onclick: async () => { closeModal(); S.places = await fx.places(); renderSidebar(); navigate(r.dest); } }, 'Åpne All Photos'),
-  ]);
-  load(tab(), { keepSel: true });
+  S.sortRunning = false;
+  const lines = [`Flyttet ${plural(r.moved || 0, 'bilde', 'bilder')} til All Photos.`];
+  if (r.dups) lines.push(`${plural(r.dups, 'duplikat', 'duplikater')} lagt i Duplicates (ingenting er slettet).`);
+  if (r.skipped) lines.push(`${plural(r.skipped, 'bilde', 'bilder')} som bare ligger i skyen ble hoppet over.`);
+  if (r.cancelled) lines.push('Kjør «Sorter bilder» igjen for å fortsette der den slapp.');
+  if (r.error) lines.push(r.error);
+  card.finish({
+    title: r.cancelled ? 'Sorteringen ble avbrutt' : r.error ? 'Sorteringen stoppet' : 'Bildene er sortert',
+    lines, failed: r.failed || [],
+    buttons: [{ label: 'Åpne All Photos', accent: true, action: async () => { S.places = await fx.places(); renderSidebar(); navigate(r.dest); } }],
+  });
+  if (!isVirtual(tab().loc)) load(tab(), { keepSel: true });
+}
+
+// ---------- Fremdriftskort for bildeflytting (blokkerer ikke resten av appen) ----------
+
+function taskCard({ title, sub, onCancel }) {
+  const titleEl = h('div', { class: 'op-title' }, title);
+  const subEl = h('div', { class: 'op-sub' }, sub || '');
+  const pctEl = h('div', { class: 'op-pct' }, 'Forbereder …');
+  const barEl = h('div');
+  const progEl = h('div', { class: 'progress indet' }, barEl);
+  const fileEl = h('div', { class: 'op-rows' });
+  const cancelBtn = h('button', { class: 'btn', onclick: () => { onCancel && onCancel(); cancelBtn.disabled = true; cancelBtn.textContent = 'Avbryter …'; } }, 'Avbryt');
+  const foot = h('div', { class: 'op-foot' }, h('div', { class: 'spacer' }), cancelBtn);
+  const el = h('div', { class: 'op-card' }, h('div', { class: 'op-head' }, h('span', { class: 'op-icon', html: PS_ICON }), titleEl), subEl, pctEl, progEl, fileEl, foot);
+  opsContainer().append(el);
+  const samples = [];
+  const close = () => { el.classList.add('closing'); setTimeout(() => el.remove(), 200); };
+  return {
+    update(p) {
+      if (!p.total) return;
+      progEl.classList.remove('indet');
+      const frac = p.done / p.total;
+      barEl.style.width = `${Math.floor(frac * 100)}%`;
+      const now = performance.now();
+      samples.push({ t: now, d: p.done });
+      while (samples.length > 2 && now - samples[0].t > 20000) samples.shift();
+      const a = samples[0], b = samples[samples.length - 1];
+      const rate = b.t - a.t > 2000 ? (b.d - a.d) / ((b.t - a.t) / 1000) : 0;
+      pctEl.textContent = `${p.done.toLocaleString('nb-NO')} av ${p.total.toLocaleString('nb-NO')} bilder (${Math.floor(frac * 100)} %)`;
+      fileEl.innerHTML = '';
+      if (rate > 0) fileEl.append(h('div', { class: 'op-row' }, h('span', { class: 'k' }, 'Tid igjen'), h('span', { class: 'v' }, `${fmtDuration((p.total - p.done) / rate)} (${nf.format(rate)} bilder/s)`)));
+      if (p.file) fileEl.append(h('div', { class: 'op-row' }, h('span', { class: 'k' }, 'Nå'), h('span', { class: 'v', title: p.file }, basename(p.file))));
+    },
+    finish({ title: t, lines = [], failed = [], buttons = [], autoClose = false }) {
+      el.classList.add('finished');
+      titleEl.textContent = t;
+      subEl.remove();
+      progEl.remove();
+      pctEl.remove();
+      fileEl.innerHTML = '';
+      for (const l of lines) fileEl.append(h('div', { class: 'op-pct op-msg', style: 'margin-top:6px' }, l));
+      if (failed.length) fileEl.append(h('div', { class: 'fail-list' }, failed.slice(0, 20).map(f => h('div', {}, h('b', {}, basename(f.path)), `: ${f.error}`))));
+      foot.innerHTML = '';
+      foot.append(h('div', { class: 'spacer' }), ...buttons.map(b => h('button', { class: 'btn' + (b.accent ? ' accent' : ''), onclick: () => { close(); b.action && b.action(); } }, b.label)),
+        h('button', { class: 'btn', onclick: close }, 'Lukk'));
+      if (autoClose && !failed.length) setTimeout(close, 3500);
+    },
+  };
 }
 
 // ---------- Galleri ----------
@@ -1519,6 +1561,7 @@ function renderGallery(view) {
 }
 
 async function galleryMove(paths) {
+  if (S.sortRunning) { toast('En bildeflytting pågår allerede. Vent til den er ferdig, eller avbryt den nederst til høyre.'); return; }
   const g = S.gallery;
   const items = (g.items || []).filter(i => paths.includes(i.path) && !i.moved);
   if (!items.length) return;
@@ -1534,20 +1577,24 @@ async function galleryMove(paths) {
     });
     if (r !== 0) return;
   }
-  let bar = null, text = null;
+  let card = null;
   if (items.length > 3 || online.length) {
-    bar = h('div');
-    text = h('p', {}, 'Forbereder …');
-    modal([h('h3', { html: PS_ICON + 'Flytter bilder …' }), text, h('div', { class: 'progress' }, bar)],
-      [h('button', { class: 'btn', onclick: () => { fx.psCancel(); text.textContent = 'Avbryter …'; } }, 'Avbryt')]);
-    galleryMoveProgress = (p) => {
-      bar.style.width = `${p.total ? Math.round(p.done / p.total * 100) : 100}%`;
-      text.textContent = `${p.done.toLocaleString('nb-NO')} av ${p.total.toLocaleString('nb-NO')} filer`;
-    };
+    card = taskCard({ title: `Flytter ${plural(items.length, 'bilde', 'bilder')} til All Photos`, sub: 'Du kan bruke Filutforsker som vanlig imens.', onCancel: () => fx.psCancel() });
+    galleryMoveProgress = (p) => card.update(p);
   }
-  const r = await fx.galleryMove(items.map(i => i.path));
+  S.sortRunning = true;
+  let r;
+  try { r = await fx.galleryMove(items.map(i => i.path)); }
+  catch (e) { r = { moved: 0, failed: [{ path: items[0].path, error: cleanErr(e) }], moves: [] }; }
   galleryMoveProgress = null;
-  if (bar) closeModal();
+  S.sortRunning = false;
+  if (card) {
+    card.finish({
+      title: r.cancelled ? 'Flyttingen ble avbrutt' : 'Bildene er flyttet',
+      lines: [`Flyttet ${plural(r.moved || 0, 'bilde', 'bilder')} til All Photos.${r.dups ? ` ${plural(r.dups, 'duplikat', 'duplikater')} lagt i Duplicates.` : ''}`],
+      failed: r.failed || [], autoClose: !r.cancelled,
+    });
+  }
   const map = new Map((r.moves || []).map(m => [m.from, m.to]));
   const t = tab();
   for (const it of g.items) {
@@ -1557,7 +1604,8 @@ async function galleryMove(paths) {
       it.path = to; it.name = basename(to); it.moved = true; it.onlineOnly = false; it.provider = null;
     }
   }
-  if (r.failed && r.failed.length) toast(`Kunne ikke flytte ${plural(r.failed.length, 'fil', 'filer')}: ${r.failed[0].error}`, 'error');
+  if (card) { /* kortet viser resultatet */ }
+  else if (r.failed && r.failed.length) toast(`Kunne ikke flytte ${plural(r.failed.length, 'fil', 'filer')}: ${r.failed[0].error}`, 'error');
   else if (r.moved) toast(r.dups ? `Flyttet ${plural(r.moved, 'fil', 'filer')} til All Photos (${plural(r.dups, 'duplikat', 'duplikater')} lagt i Duplicates).` : `Flyttet ${plural(r.moved, 'fil', 'filer')} til All Photos.`);
   if (t.loc === 'gallery:') load(t, { keepSel: true });
 }

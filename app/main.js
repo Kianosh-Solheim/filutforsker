@@ -1,4 +1,7 @@
 'use strict';
+// Må settes før første asynkrone filoperasjon. Standard er 4, som gjør at flytting av mange
+// skyfiler (som venter på nedlasting) blokkerer vanlig bla i mapper.
+if (!process.env.UV_THREADPOOL_SIZE) process.env.UV_THREADPOOL_SIZE = '32';
 const { app, BrowserWindow, ipcMain, shell, nativeImage, Menu, clipboard, dialog, nativeTheme } = require('electron');
 const fs = require('fs');
 const path = require('path');

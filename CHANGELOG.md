@@ -2,6 +2,12 @@
 
 Hver versjon har en overskrift `## x.y.z`. Teksten under vises i appen når far trykker «Hva er nytt».
 
+## 1.5.2
+
+- Filutforsker kan nå brukes som vanlig mens bilder sorteres eller flyttes. Fremdriften vises i et lite kort nederst til høyre i stedet for et vindu som dekker alt.
+  - Kortet viser antall bilder, prosent, omtrent hvor lang tid som er igjen, og hvilket bilde som flyttes nå.
+- Mapper åpnes raskt også mens mange bilder hentes fra skyen i bakgrunnen.
+
 ## 1.5.1
 
 - «Sorter bilder» og flytting fra Galleriet går mye raskere:

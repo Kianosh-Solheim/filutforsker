@@ -121,6 +121,22 @@ function md5(file) {
   });
 }
 
+// Vent til en skyfil er lastet ned, uten å holde av en diskarbeider mens nettet jobber.
+// (Å lese fila direkte ville blokkert en av appens få diskarbeidere til nedlastingen er ferdig.)
+async function waitLocal(f, requested) {
+  const deadline = Date.now() + 10 * 60 * 1000;
+  let asked = requested;
+  for (;;) {
+    if (cancelled) throw new Error('avbrutt');
+    let st;
+    try { st = await fs.promises.stat(f.path); } catch { return; }
+    if (st.size === 0 || st.blocks * 512 >= st.size * 0.98) return;
+    if (!asked) { asked = true; cloud.download([f.path]).catch(() => {}); }
+    if (Date.now() > deadline) return; // gi opp å vente; lesingen henter den uansett
+    await new Promise(r => setTimeout(r, 400));
+  }
+}
+
 // Reserverte målnavn, så parallelle flyttinger aldri velger samme navn (rename overskriver uten å spørre).
 const reserved = new Set();
 async function uniqueTarget(dir, name) {
@@ -211,7 +227,9 @@ async function run(files, opts, onProgress) {
     const start = Math.max(prefetchedTo, from);
     const end = Math.min(todo.length, start + PREFETCH_AHEAD);
     prefetchedTo = end;
-    const paths = todo.slice(start, end).filter(f => f.onlineOnly).map(f => f.path);
+    const list = todo.slice(start, end).filter(f => f.onlineOnly);
+    list.forEach(f => { f.requested = true; });
+    const paths = list.map(f => f.path);
     if (!paths.length) return;
     prefetching = true;
     cloud.download(paths).catch(() => {}).finally(() => { prefetching = false; });
@@ -240,7 +258,8 @@ async function run(files, opts, onProgress) {
         // siden kopiering ofte nullstiller opprettelsesdatoen.
         const fsDates = [f.birth, f.mtime].filter(x => x && x > 0);
         const d = (await dateFor(idx)) || new Date(fsDates.length ? Math.min(...fsDates) : Date.now());
-        const h = await md5(f.path); // leser fila, så skyfiler lastes ned før flytting
+        if (f.onlineOnly) await waitLocal(f, f.requested);
+        const h = await md5(f.path);
         let targetDir;
         // Sjekk og registrering skjer uten await imellom, så to like filer ikke begge slipper gjennom.
         if (h && known.has(h)) { targetDir = path.join(DEST, 'Duplicates'); dups++; }
