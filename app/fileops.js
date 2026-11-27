@@ -142,14 +142,16 @@ async function copyNode(node, dst, job, sameDev) {
 // ---------- Hovedfunksjon ----------
 
 // kind: 'copy' | 'move' | 'trash'. trashItem: (path) => Promise (Electrons shell.trashItem).
-async function run({ id, kind, srcs, destDir }, { trashItem, onProgress }) {
+// policy ved navnekollisjon: 'rename' (behold begge), 'replace' (det gamle til papirkurven) eller 'skip'.
+// trashMany(paths) -> [{ path, ok, name, error }] brukes for papirkurv-jobber (name = navnet i papirkurven).
+async function run({ id, kind, srcs, destDir, policy = 'rename' }, { trashItem, trashMany, onProgress }) {
   const job = {
     id, kind, cancelled: false, child: null,
     phase: kind === 'trash' ? 'trash' : 'scan',
     totalBytes: 0, doneBytes: 0, fileBytes: 0, totalFiles: 0, doneFiles: 0,
     items: srcs.length, itemsDone: 0,
     current: '', currentCloud: false,
-    done: [], failed: [], moreFailed: 0,
+    done: [], failed: [], moreFailed: 0, moves: [], trashed: [], skipped: 0, replaced: 0,
     lastReport: 0,
   };
   job.report = (force) => {
@@ -170,13 +172,24 @@ async function run({ id, kind, srcs, destDir }, { trashItem, onProgress }) {
   try {
     if (kind === 'trash') {
       job.totalFiles = srcs.length;
-      for (const src of srcs) {
+      const many = trashMany || (async (paths) => {
+        const out = [];
+        for (const p of paths) { try { await trashItem(p); out.push({ path: p, ok: true }); } catch (e) { out.push({ path: p, ok: false, error: e.message }); } }
+        return out;
+      });
+      for (let i = 0; i < srcs.length;) {
         if (job.cancelled) break;
-        job.current = path.basename(src);
+        const chunk = srcs.slice(i, i + (i === 0 ? 3 : 15));
+        i += chunk.length;
+        job.current = path.basename(chunk[0]);
         job.report(true);
-        try { await trashItem(src); job.done.push(src); } catch (e) { fail(job, src, e); }
-        job.doneFiles++;
-        job.itemsDone++;
+        const res = await many(chunk);
+        for (const r of res) {
+          if (r.ok) { job.done.push(r.path); job.trashed.push({ from: r.path, name: r.name || null }); }
+          else fail(job, r.path, new Error(String(r.error || 'ukjent feil').replace(/^Error:\s*/, '')));
+          job.doneFiles++;
+          job.itemsDone++;
+        }
         job.report();
       }
       return finish(job);
@@ -189,10 +202,20 @@ async function run({ id, kind, srcs, destDir }, { trashItem, onProgress }) {
       try {
         if (kind === 'move' && path.dirname(src) === destDir) { job.itemsDone++; continue; }
         if ((destDir + path.sep).startsWith(src + path.sep)) throw new Error('Kan ikke legge en mappe inni seg selv.');
-        const target = await uniqueName(destDir, path.basename(src));
+        let target = path.join(destDir, path.basename(src));
+        let exists = false;
+        try { await fs.promises.lstat(target); exists = true; } catch {}
+        if (exists) {
+          const sameDir = path.dirname(src) === destDir;
+          const containsSrc = (src + path.sep).startsWith(target + path.sep);
+          if (!sameDir && !containsSrc && policy === 'skip') { job.skipped++; job.itemsDone++; continue; }
+          if (!sameDir && !containsSrc && policy === 'replace') { await trashItem(target); job.replaced++; }
+          else target = await uniqueName(destDir, path.basename(src));
+        }
         if (kind === 'move') {
           try {
             await fs.promises.rename(src, target);
+            job.moves.push({ from: src, to: target });
             job.done.push(target);
             job.itemsDone++;
             continue;
@@ -227,6 +250,7 @@ async function run({ id, kind, srcs, destDir }, { trashItem, onProgress }) {
           if (clean) await trashItem(t.src);
           else fail(job, t.src, new Error('Noen filer kunne ikke kopieres, så originalen ble beholdt.'));
         }
+        job.moves.push({ from: t.src, to: t.target });
         job.done.push(t.target);
       } catch (e) {
         if (e.cancelled) {
@@ -248,7 +272,11 @@ async function run({ id, kind, srcs, destDir }, { trashItem, onProgress }) {
 function finish(job) {
   job.phase = 'done';
   job.report(true);
-  return { done: job.done, failed: job.failed, moreFailed: job.moreFailed, cancelled: job.cancelled, itemsDone: job.itemsDone, items: job.items };
+  return {
+    done: job.done, failed: job.failed, moreFailed: job.moreFailed, cancelled: job.cancelled,
+    itemsDone: job.itemsDone, items: job.items, moves: job.moves, trashed: job.trashed,
+    skipped: job.skipped, replaced: job.replaced,
+  };
 }
 
 module.exports = { run, cancel, active, uniqueName };

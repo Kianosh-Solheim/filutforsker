@@ -50,6 +50,13 @@ function cloudRoots() {
     const prov = providerFromDirName(e.name);
     roots.push({ ...prov, path: p });
   }
+  // Foreldede mapper: OneDrive m.fl. lager kopier som «OneDrive-Personal (02.05.2026 20:11)» eller
+  // «OneDrive-Personal(2)» når man logger inn på nytt. Er grunnmappen der, regnes kopien som foreldet.
+  const names = new Set(roots.map(r => path.basename(r.path)));
+  for (const r of roots) {
+    const m = path.basename(r.path).match(/^(.+?)\s*\(([^)]*)\)$/);
+    if (m && names.has(m[1].trim())) r.stale = true;
+  }
   // Eldre plasseringer (før File Provider)
   for (const [id, label, p] of [
     ['dropbox', 'Dropbox', path.join(HOME, 'Dropbox')],

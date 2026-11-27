@@ -547,3 +547,20 @@ svg { display: block; }
 .op-toggle { border: 0; background: transparent; color: var(--text-2); display: inline-flex; align-items: center; gap: 6px; padding: 4px 6px 4px 2px; border-radius: 4px; font-size: 12px; }
 .op-toggle:hover { background: var(--hover); color: var(--text); }
 .op-toggle svg { width: 11px; height: 11px; }
+
+/* ---------- Navnekollisjon ---------- */
+.conflict-lead { color: var(--text) !important; }
+.conflict-opt {
+  display: flex; gap: 14px; align-items: flex-start; width: 100%; text-align: left; margin: 8px 0; padding: 12px 14px;
+  border: 1px solid var(--stroke-2); border-radius: 8px; background: var(--content); cursor: default;
+}
+.conflict-opt:hover { border-color: var(--accent); background: var(--info-bg); }
+.conflict-opt .co-icon { width: 20px; height: 20px; color: var(--accent); flex: none; margin-top: 1px; }
+.conflict-opt .co-icon svg { width: 20px; height: 20px; }
+.conflict-opt .co-text { display: flex; flex-direction: column; gap: 2px; }
+.conflict-opt .co-title { font-weight: 600; }
+.conflict-opt .co-sub { color: var(--text-2); font-size: 12px; }
+
+/* ---------- Sidepanel: skjulte elementer ---------- */
+.side-more { font-size: 12px; color: var(--text-3); padding: 4px 10px 6px 42px; border-radius: 5px; }
+.side-more:hover { color: var(--accent); background: var(--hover); }

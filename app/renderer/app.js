@@ -414,11 +414,17 @@ function renderSidebar() {
     el.addEventListener('contextmenu', (e) => {
       e.preventDefault();
       if (isVirtual(p)) return;
+      const cl = S.places.clouds.find(c => c.path === p);
+      const inQuick = el.closest('.side-group')?.dataset.group === 'quick';
       showMenu([
         { label: 'Åpne', icon: 'open', action: () => navigate(p) },
         { label: 'Åpne i ny fane', icon: 'plus', action: () => addTab(p) },
         { label: 'Vis i Finder', icon: 'finder', action: () => fx.open(p) },
         '-',
+        inQuick ? { label: 'Løsne fra Hurtigtilgang', icon: 'close', action: () => unpin(p) } : null,
+        !inQuick && !cl ? { label: 'Fest i Hurtigtilgang', icon: 'plus', action: () => pin(p) } : null,
+        cl ? { label: 'Skjul fra sidepanelet', icon: 'hidden', action: () => setCloudVisible(cl, false) } : null,
+        cl ? { label: 'Fest i Hurtigtilgang', icon: 'plus', disabled: isPinned(p), action: () => pin(p) } : null,
         { label: 'Kopier bane', icon: 'link', action: () => fx.copyText(p) },
       ], e.clientX, e.clientY);
     });
@@ -426,7 +432,7 @@ function renderSidebar() {
     return el;
   };
   const group = (key, title, items) => {
-    const g = h('div', { class: 'side-group' + (S.collapsed[key] ? ' collapsed' : '') });
+    const g = h('div', { class: 'side-group' + (S.collapsed[key] ? ' collapsed' : ''), dataset: { group: key } });
     const head = h('div', { class: 'side-head' }, h('span', { class: 'twisty' }, ic('chevronDown')), title);
     head.addEventListener('click', () => { g.classList.toggle('collapsed'); S.collapsed[key] = g.classList.contains('collapsed'); LS.set('collapsed', S.collapsed); });
     g.append(head, h('div', { class: 'side-items' }, items));
@@ -436,9 +442,29 @@ function renderSidebar() {
   sb.append(item('Start', 'start:', ICONS.sidebar.start));
   sb.append(item('Galleri', 'gallery:', ICONS.sidebar.pictures));
   sb.append(h('div', { class: 'side-sep' }));
-  sb.append(group('quick', 'Hurtigtilgang', S.places.quick.map(q => item(q.icon === 'home' ? basename(q.path) : q.label, q.path, ICONS.sidebar[q.icon] || ICONS.kinds.folder))));
-  const clouds = S.places.clouds.map(c => item(c.label, c.path, ICONS.providerIcon(c.icon), c.account ? c.account.split('@')[0] : null));
-  if (!clouds.length) clouds.push(h('div', { class: 'side-item', style: 'color:var(--text-3)' }, 'Ingen skytjenester funnet'));
+  const quick = visibleQuick().map(q => item(q.icon === 'home' ? basename(q.path) : q.label, q.path, q.iconHtml || ICONS.sidebar[q.icon] || ICONS.kinds.folder));
+  if (S.hiddenQuick.length) {
+    const more = h('div', { class: 'side-more' }, `${plural(S.hiddenQuick.length, 'standardmappe', 'standardmapper')} skjult – vis`);
+    more.addEventListener('click', () => { S.hiddenQuick = []; LS.set('hiddenQuick', S.hiddenQuick); renderSidebar(); });
+    quick.push(more);
+  }
+  sb.append(group('quick', 'Hurtigtilgang', quick));
+  const clouds = visibleClouds().map(c => item(c.label, c.path, ICONS.providerIcon(c.icon), c.account ? c.account.split('@')[0] : null));
+  if (!S.places.clouds.length) clouds.push(h('div', { class: 'side-item', style: 'color:var(--text-3)' }, 'Ingen skytjenester funnet'));
+  const hid = hiddenClouds();
+  if (hid.length) {
+    const more = h('div', { class: 'side-more', title: hid.map(c => c.label).join('\n') }, `${plural(hid.length, 'mappe', 'mapper')} skjult – vis`);
+    more.addEventListener('click', (e) => {
+      const r = more.getBoundingClientRect();
+      showMenu([
+        ...hid.map(c => ({ label: `Vis «${c.label}»`, iconHtml: ICONS.providerIcon(c.icon), action: () => setCloudVisible(c, true) })),
+        '-',
+        { label: 'Hvorfor er de skjult?', icon: 'details', disabled: true },
+        { label: 'Gamle kopier som OneDrive lagde ved ny innlogging.', disabled: true },
+      ], r.left, r.bottom + 2);
+    });
+    clouds.push(more);
+  }
   sb.append(group('cloud', 'Skylagring', clouds));
   sb.append(group('mac', 'Denne Macen', S.places.volumes.map(v => item(v.label, v.path, ICONS.sidebar[v.icon] || ICONS.sidebar.drive))));
   renderSidebarActive();
@@ -713,15 +739,17 @@ async function renderStart(view) {
   };
 
   wrap.append(h('h2', {}, 'Hurtigtilgang'));
-  wrap.append(h('div', { class: 'qa-grid' }, S.places.quick.map(q =>
-    qa(q.icon === 'home' ? basename(q.path) : q.label, q.path, ICONS.kinds.folder, q.icon === 'home' ? 'Hjemmemappe' : 'Denne Macen', q.icon !== 'home' ? ICONS.sidebar[q.icon] : ICONS.sidebar.home))));
+  wrap.append(h('div', { class: 'qa-grid' }, visibleQuick().map(q =>
+    qa(q.icon === 'home' ? basename(q.path) : q.label, q.path, ICONS.kinds.folder,
+      q.pinned ? (cloudRootOf(q.path)?.label || 'Festet') : q.icon === 'home' ? 'Hjemmemappe' : 'Denne Macen',
+      q.pinned ? '<svg viewBox="0 0 16 16"><path d="M10.2 1.8 14.2 5.8 12.4 6.6 9.9 9.1 10.3 12.3 9.3 13.3 6.6 10.6 3 14.2 1.8 13 5.4 9.4 2.7 6.7 3.7 5.7 6.9 6.1 9.4 3.6z" fill="#0a64c8"/></svg>' : q.icon !== 'home' ? ICONS.sidebar[q.icon] : ICONS.sidebar.home))));
 
   wrap.append(h('h2', {}, 'Skylagring'));
   if (!S.places.clouds.length) {
     wrap.append(h('div', { class: 'empty-note' }, 'Fant ingen skytjenester. Installer og logg inn i iCloud Drive, OneDrive, Google Drive eller Dropbox, så dukker de opp her automatisk.'));
   } else {
     const cards = h('div', { class: 'cloud-cards' });
-    for (const c of S.places.clouds) {
+    for (const c of visibleClouds()) {
       const card = h('div', { class: 'cloud-card', title: c.path },
         h('div', { class: 'cc-icon', html: ICONS.providerIcon(c.icon) }),
         h('div', { class: 'cc-main' }, h('div', { class: 'cc-title' }, c.label), h('div', { class: 'cc-sub' }, c.account || 'Synkronisert mappe')));
@@ -783,6 +811,7 @@ function updateSelectionClasses() {
   updateCommandBar();
   updateStatusBar();
   updateDetailsPane();
+  syncPreview();
   if (t.loc === 'gallery:') { const old = $('#view .gal-bar'); if (old) old.replaceWith(buildGalleryBar()); }
 }
 function selectOnly(p) {
@@ -837,8 +866,12 @@ function doCopy(mode) {
 async function doPaste(destDir = currentDir()) {
   if (!S.clip || !destDir) return;
   const { mode, paths } = S.clip;
+  const kind = mode === 'cut' ? 'move' : 'copy';
+  const policy = await askConflictPolicy(kind, paths, destDir);
+  if (!policy) return;
   if (mode === 'cut') { S.clip = null; renderView(); }
-  const r = await runOp(mode === 'cut' ? 'move' : 'copy', paths, destDir);
+  const r = await runOp(kind, paths, destDir, policy);
+  pushTransferUndo(kind, r);
   if (tab().loc !== destDir) return;
   await load(tab(), { keepSel: false });
   const t = tab();
@@ -849,7 +882,11 @@ async function doPaste(destDir = currentDir()) {
 async function transfer(paths, destDir, copy) {
   paths = paths.filter(p => p !== destDir);
   if (!paths.length) return;
-  await runOp(copy ? 'copy' : 'move', paths, destDir);
+  const kind = copy ? 'copy' : 'move';
+  const policy = await askConflictPolicy(kind, paths, destDir);
+  if (!policy) return;
+  const r = await runOp(kind, paths, destDir, policy);
+  pushTransferUndo(kind, r);
   load(tab(), { keepSel: true });
 }
 
@@ -871,7 +908,13 @@ async function doDelete() {
     if (r !== 0) return;
   }
   const dir = tab().loc;
-  await runOp('trash', sel.map(i => i.path), null);
+  const r = await runOp('trash', sel.map(i => i.path), null);
+  if (r.trashed && r.trashed.length) {
+    pushUndo({
+      label: `sletting av ${plural(r.trashed.length, 'element', 'elementer')}`,
+      run: () => putBack(r.trashed),
+    });
+  }
   if (tab().loc === dir) load(tab());
 }
 
@@ -880,6 +923,8 @@ async function newFolder() {
   if (!dir) return;
   try {
     const p = await fx.mkdir(dir, 'Ny mappe');
+    S.freshFolder = p;
+    pushUndo({ label: 'ny mappe', run: () => runOp('trash', [S.undoAlias.get(p) || p], null) });
     await load(tab());
     selectOnly(p);
     startRename(p);
@@ -908,6 +953,8 @@ function startRename(p) {
     if (commit && val && val !== it.name) {
       try {
         const np = await fx.rename(p, val);
+        if (S.freshFolder === p) { S.undoAlias.set(p, np); S.freshFolder = null; }
+        else pushUndo({ label: 'nytt navn', run: async () => { await fx.rename(np, it.name); } });
         await load(tab());
         selectOnly(np);
         return;
@@ -1011,6 +1058,7 @@ async function updateDetailsPane() {
   const st = t.cloud[it.path];
   const actions = h('div', { class: 'dp-actions' },
     h('button', { class: 'btn accent', onclick: () => openItem(it) }, 'Åpne'),
+    h('button', { class: 'btn', onclick: () => { S.previewing = null; t.focus = it.path; togglePreview(); } }, 'Forhåndsvis'),
     h('button', { class: 'btn', onclick: () => fx.reveal(it.path) }, 'Vis i Finder'));
   if (cloudRootOf(it.path)) {
     if (it.isDir || (st && st.state === 'online')) actions.append(h('button', { class: 'btn', onclick: () => cloudAction('download', [it]) }, ic('cloudDown'), 'Last ned'));
@@ -1124,6 +1172,8 @@ function itemContextMenu(e, p) {
   const one = sel.length === 1;
   showMenu([
     { label: 'Åpne', icon: 'open', key: '↵', action: () => sel.forEach(openItem) },
+    { label: 'Forhåndsvis', icon: 'eye', key: 'mellomrom', action: () => { S.previewing = null; t.focus = p; togglePreview(); } },
+    one && it.isDir && !it.isApp ? (isPinned(it.path) ? { label: 'Løsne fra Hurtigtilgang', icon: 'close', action: () => unpin(it.path) } : { label: 'Fest i Hurtigtilgang', icon: 'plus', action: () => pin(it.path) }) : null,
     one && it.isDir && !it.isApp ? { label: 'Åpne i ny fane', icon: 'plus', action: () => addTab(it.path) } : null,
     t.search || t.loc === 'gallery:' ? { label: 'Åpne plasseringen', icon: 'folderNew', action: () => navigate(dirname(it.path)).then(() => selectOnly(it.path)) } : null,
     t.loc === 'gallery:' ? { label: 'Flytt til All Photos', icon: 'photos', disabled: !sel.some(i => !i.moved), action: () => galleryMove(sel.map(i => i.path)) } : null,
@@ -1151,9 +1201,11 @@ function backgroundContextMenu(e) {
     { label: 'Vis', icon: 'view', action: () => { const b = $('.cmd[data-cmd="view-menu"]').getBoundingClientRect(); showMenu(viewMenuItems(), b.left, b.bottom + 4); } },
     { label: 'Sorter etter', icon: 'sort', action: () => { const b = $('.cmd[data-cmd="sort-menu"]').getBoundingClientRect(); showMenu(sortMenuItems(), b.left, b.bottom + 4); } },
     { label: 'Oppdater', icon: 'refresh', key: '⌘R', action: () => load(t, { keepSel: true }) },
+    { label: UNDO.length ? `Angre ${UNDO[UNDO.length - 1].label}` : 'Angre', icon: 'back', key: '⌘Z', disabled: !UNDO.length, action: undoLast },
     '-',
     { label: 'Lim inn', icon: 'paste', key: '⌘V', disabled: !S.clip || !dir, action: () => doPaste() },
     { label: 'Ny mappe', icon: 'folderNew', key: '⇧⌘N', disabled: !dir, action: newFolder },
+    dir ? (isPinned(dir) ? { label: 'Løsne denne mappen fra Hurtigtilgang', icon: 'close', action: () => unpin(dir) } : { label: 'Fest denne mappen i Hurtigtilgang', icon: 'plus', action: () => pin(dir) }) : null,
     '-',
     { label: 'Sorter bilder her …', icon: 'photos', action: openPhotoSort },
     { label: 'Åpne i Finder', icon: 'finder', disabled: !dir, action: () => fx.open(dir) },
@@ -1590,6 +1642,161 @@ async function installUpdate() {
   setTimeout(() => fx.updateRestart(), 1500);
 }
 
+// ---------- Navnekollisjon ----------
+
+async function askConflictPolicy(kind, srcs, destDir) {
+  let conflicts = [];
+  try { conflicts = await fx.conflicts(srcs, destDir); } catch {}
+  if (!conflicts.length) return 'rename';
+  return new Promise((resolve) => {
+    const done = (v) => { closeModal(); resolve(v); };
+    const n = conflicts.length;
+    const verb = kind === 'move' ? 'Flytter' : 'Kopierer';
+    const opt = (value, title, sub, icon) => {
+      const b = h('button', { class: 'conflict-opt', onclick: () => done(value) },
+        h('span', { class: 'co-icon' }, ic(icon)),
+        h('span', { class: 'co-text' }, h('span', { class: 'co-title' }, title), h('span', { class: 'co-sub' }, sub)));
+      return b;
+    };
+    const names = conflicts.slice(0, 4).map(c => c.name);
+    modal([
+      h('h3', {}, 'Erstatt eller hopp over'),
+      h('p', {}, `${verb} ${plural(srcs.length, 'element', 'elementer')} fra ${placeName(dirname(srcs[0]))} til ${placeName(destDir)}.`),
+      h('p', { class: 'conflict-lead' }, n === 1
+        ? `Målmappen har allerede et element som heter «${conflicts[0].name}».`
+        : `Målmappen har allerede ${n} elementer med samme navn: ${names.map(x => `«${x}»`).join(', ')}${n > names.length ? ` og ${n - names.length} til` : ''}.`),
+      opt('replace', n === 1 ? 'Erstatt elementet i målmappen' : 'Erstatt elementene i målmappen', 'Det gamle legges i papirkurven, så det kan hentes tilbake.', 'check'),
+      opt('skip', n === 1 ? 'Hopp over dette elementet' : 'Hopp over disse elementene', 'De andre blir ' + (kind === 'move' ? 'flyttet' : 'kopiert') + ' som vanlig.', 'forward'),
+      opt('rename', 'Behold begge', 'Det nye får et nummer, for eksempel «bilde (2).jpg».', 'copy'),
+    ], [h('button', { class: 'btn', onclick: () => done(null) }, 'Avbryt')]);
+  });
+}
+
+// ---------- Angre ----------
+
+const UNDO = [];
+S.undoAlias = new Map();
+function pushUndo(entry) {
+  UNDO.push(entry);
+  if (UNDO.length > 50) UNDO.shift();
+}
+
+function pushTransferUndo(kind, r) {
+  const moves = (r && r.moves) || [];
+  if (!moves.length) return;
+  const n = plural(moves.length, 'element', 'elementer');
+  if (kind === 'copy') {
+    pushUndo({ label: `kopiering av ${n}`, run: () => runOp('trash', moves.map(m => m.to), null) });
+    return;
+  }
+  pushUndo({
+    label: `flytting av ${n}`,
+    run: async () => {
+      const groups = new Map();
+      for (const m of moves) {
+        const d = dirname(m.from);
+        if (!groups.has(d)) groups.set(d, []);
+        groups.get(d).push(m);
+      }
+      let failed = 0;
+      for (const [dir, ms] of groups) {
+        const res = await runOp('move', ms.map(m => m.to), dir, 'rename');
+        failed += (res.failed || []).length;
+        // Fikk et element et nummer fordi navnet var opptatt, gi det tilbake det opprinnelige navnet hvis mulig.
+        for (const mv of res.moves || []) {
+          const orig = ms.find(m => m.to === mv.from);
+          if (orig && basename(mv.to) !== basename(orig.from)) { try { await fx.rename(mv.to, basename(orig.from)); } catch {} }
+        }
+      }
+      if (failed) throw new Error(`${plural(failed, 'element', 'elementer')} kunne ikke flyttes tilbake`);
+    },
+  });
+}
+
+async function putBack(trashed) {
+  const items = trashed.filter(t => t.name).map(t => ({ name: t.name, dir: dirname(t.from), orig: basename(t.from) }));
+  const missing = trashed.length - items.length;
+  const res = items.length ? await fx.putBack(items) : [];
+  const failed = res.filter(x => !x.ok).length + missing;
+  if (failed) {
+    const err = new Error(`${plural(failed, 'element', 'elementer')} kunne ikke legges tilbake automatisk. Papirkurven er åpnet: høyreklikk og velg «Legg tilbake».`);
+    fx.openTrash();
+    throw err;
+  }
+}
+
+let undoing = false;
+async function undoLast() {
+  if (undoing) return;
+  const u = UNDO.pop();
+  if (!u) { toast('Det er ingenting å angre.'); return; }
+  undoing = true;
+  try {
+    await u.run();
+    toast(`Angret ${u.label}.`);
+  } catch (e) {
+    toast(`Kunne ikke angre ${u.label}: ${cleanErr(e)}`, 'error');
+  } finally {
+    undoing = false;
+  }
+  const t = tab();
+  if (!isVirtual(t.loc)) load(t, { keepSel: true });
+}
+
+// ---------- Forhåndsvisning (mellomrom) ----------
+
+S.previewing = null;
+async function togglePreview() {
+  const t = tab();
+  if (S.previewing) { S.previewing = null; fx.preview(null); return; }
+  const p = t.focus || [...t.sel][0];
+  if (!p) return;
+  const ok = await fx.preview(p);
+  if (ok) S.previewing = p;
+  else toast('Forhåndsvisning finnes bare på Mac.');
+}
+function syncPreview() {
+  const t = tab();
+  if (S.previewing && t.focus && t.focus !== S.previewing) { S.previewing = t.focus; fx.preview(t.focus); }
+}
+
+// ---------- Hurtigtilgang og skjulte skytjenester ----------
+
+S.pins = LS.get('pins', []);
+S.hiddenQuick = LS.get('hiddenQuick', []);
+S.cloudVis = LS.get('cloudVis', {});
+function visibleQuick() {
+  const base = S.places.quick.filter(q => !S.hiddenQuick.includes(q.path));
+  const pins = S.pins.filter(p => !base.some(q => q.path === p)).map(p => {
+    const c = cloudRootOf(p);
+    return { label: c && c.path === p ? c.label : basename(p), path: p, pinned: true, iconHtml: c && c.path === p ? ICONS.providerIcon(c.icon) : ICONS.kinds.folder };
+  });
+  return [...base, ...pins];
+}
+const cloudVisible = (c) => (c.path in S.cloudVis ? S.cloudVis[c.path] : !c.stale);
+function visibleClouds() { return S.places.clouds.filter(cloudVisible); }
+function hiddenClouds() { return S.places.clouds.filter(c => !cloudVisible(c)); }
+function isPinned(p) { return S.pins.includes(p) || (S.places.quick.some(q => q.path === p) && !S.hiddenQuick.includes(p)); }
+function pin(p) {
+  if (S.places.quick.some(q => q.path === p)) S.hiddenQuick = S.hiddenQuick.filter(x => x !== p);
+  else if (!S.pins.includes(p)) S.pins.push(p);
+  LS.set('pins', S.pins); LS.set('hiddenQuick', S.hiddenQuick);
+  renderSidebar();
+  toast(`«${basename(p)}» er festet i Hurtigtilgang.`);
+}
+function unpin(p) {
+  if (S.places.quick.some(q => q.path === p)) { if (!S.hiddenQuick.includes(p)) S.hiddenQuick.push(p); }
+  else S.pins = S.pins.filter(x => x !== p);
+  LS.set('pins', S.pins); LS.set('hiddenQuick', S.hiddenQuick);
+  renderSidebar();
+}
+function setCloudVisible(c, v) {
+  S.cloudVis[c.path] = v;
+  LS.set('cloudVis', S.cloudVis);
+  renderSidebar();
+  if (tab().loc === 'start:') renderView();
+}
+
 // ---------- Fremdrift for filoperasjoner ----------
 
 const OPS = new Map();
@@ -1611,13 +1818,13 @@ function fmtDuration(sec) {
 }
 const placeName = (p) => (p ? ([...S.places.clouds, ...S.places.quick.filter(q => q.icon !== 'home')].find(c => c.path === p)?.label || basename(p)) : '');
 
-async function runOp(kind, srcs, destDir) {
+async function runOp(kind, srcs, destDir, policy = 'rename') {
   const id = `op${++opSeq}-${Date.now()}`;
   const op = { id, kind, srcs, destDir, from: dirname(srcs[0]), started: performance.now(), samples: [], speeds: [], last: null, el: null, expanded: LS.get('opsExpanded', true) };
   OPS.set(id, op);
   op.showTimer = setTimeout(() => showOp(op), 400);
   let r;
-  try { r = await fx.fileOp({ id, kind, srcs, destDir }); }
+  try { r = await fx.fileOp({ id, kind, srcs, destDir, policy }); }
   catch (e) { r = { done: [], failed: [{ path: srcs[0], error: cleanErr(e) }], cancelled: false }; }
   clearTimeout(op.showTimer);
   finishOp(op, r);
@@ -1750,7 +1957,8 @@ function finishOp(op, r) {
     // Gikk så raskt at vinduet aldri ble vist: gi bare en kort beskjed.
     if (failed) toast(`Kunne ikke ${verb.inf} ${plural(failed, 'element', 'elementer')}: ${r.failed[0].error}`, 'error');
     else if (r.cancelled) toast('Avbrutt.');
-    else if (ok) toast(`${plural(ok, 'element', 'elementer')} ${verb.done.toLowerCase()}${op.kind === 'trash' ? '' : ` til ${placeName(op.destDir)}`}.`);
+    else if (ok) toast(`${plural(ok, 'element', 'elementer')} ${verb.done.toLowerCase()}${op.kind === 'trash' ? '' : ` til ${placeName(op.destDir)}`}.${r.skipped ? ` ${plural(r.skipped, 'element', 'elementer')} hoppet over.` : ''}`);
+    else if (r.skipped) toast(`${plural(r.skipped, 'element', 'elementer')} hoppet over.`);
     return;
   }
   op.cancelEl.remove();
@@ -1845,6 +2053,7 @@ function command(cmd, anchor) {
     case 'search': $('#search-input').focus(); $('#search-input').select(); break;
     case 'copy-path': copyPath(); break;
     case 'check-updates': checkUpdates(true); break;
+    case 'undo': if (inInput) fx.editAction('undo'); else undoLast(); break;
   }
 }
 
@@ -2010,6 +2219,7 @@ function bindEvents() {
   fx.on('update-progress', (p) => { if (updateProgress) updateProgress(p); });
   fx.on('gallery-progress', onGalleryProgress);
   fx.on('op-progress', onOpProgress);
+  fx.on('preview-closed', () => { S.previewing = null; });
   $('#sb-update').addEventListener('click', () => (updateInfo && updateInfo.available ? installUpdate() : checkUpdates(true)));
 }
 
@@ -2056,7 +2266,8 @@ function onKey(e) {
     case 'Delete': doDelete(); break;
     case 'F2': startRename(); e.preventDefault(); break;
     case 'F5': load(t, { keepSel: true }); break;
-    case 'Escape': if (t.search) clearSearch(); else selectOnly(null); break;
+    case 'Escape': if (S.previewing) togglePreview(); else if (t.search) clearSearch(); else selectOnly(null); break;
+    case ' ': e.preventDefault(); togglePreview(); break;
     default:
       // Hopp til element ved å skrive forbokstaven
       if (e.key.length === 1 && !e.metaKey && !e.ctrlKey && !e.altKey) typeAhead(e.key);

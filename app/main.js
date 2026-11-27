@@ -34,6 +34,10 @@ function createWindow(startPath) {
     },
   });
   win.loadFile(path.join(__dirname, 'renderer', 'index.html'), { query: { start: startPath || '' } });
+  win.on('focus', () => {
+    // Quick Look-panelet tar fokus; når vinduet får det tilbake, er forhåndsvisningen lukket.
+    if (previewing.has(win.id)) { previewing.delete(win.id); win.webContents.send('preview-closed'); }
+  });
   win.once('ready-to-show', () => {
     win.show();
     if (global.__fxBoot) global.__fxBoot.markGood();
@@ -83,7 +87,7 @@ function buildMenu() {
     {
       label: 'Rediger',
       submenu: [
-        { role: 'undo', label: 'Angre' },
+        item('Angre', 'CmdOrCtrl+Z', 'undo'),
         { role: 'redo', label: 'Gjør om' },
         { type: 'separator' },
         item('Klipp ut', 'CmdOrCtrl+X', 'cut'),
@@ -208,7 +212,7 @@ ipcMain.handle('places', async () => {
   const allPhotos = photosort.DEST;
   try { if (fs.statSync(allPhotos).isDirectory()) quick.push({ label: 'All Photos', path: allPhotos, icon: 'pictures' }); } catch {}
 
-  const clouds = cloud.cloudRoots().map(r => ({ label: r.label, path: r.path, icon: r.id, account: r.account || null }));
+  const clouds = cloud.cloudRoots().map(r => ({ label: r.label, path: r.path, icon: r.id, account: r.account || null, stale: !!r.stale }));
 
   const volumes = [{ label: 'Macintosh HD', path: '/', icon: 'drive' }, { label: 'Programmer', path: '/Applications', icon: 'apps' }];
   try {
@@ -366,7 +370,7 @@ ipcMain.handle('open', async (_e, p) => shell.openPath(p));
 ipcMain.handle('reveal', async (_e, p) => shell.showItemInFolder(p));
 ipcMain.handle('open-terminal', async (_e, p) => run('/usr/bin/open', ['-a', 'Terminal', p]));
 ipcMain.handle('copy-text', async (_e, t) => clipboard.writeText(t));
-ipcMain.handle('edit-action', async (e, a) => { if (['cut', 'copy', 'paste', 'selectAll'].includes(a)) e.sender[a](); });
+ipcMain.handle('edit-action', async (e, a) => { if (['cut', 'copy', 'paste', 'selectAll', 'undo', 'redo'].includes(a)) e.sender[a](); });
 
 ipcMain.handle('trash', async (_e, paths) => {
   const failed = [];
@@ -418,10 +422,111 @@ ipcMain.handle('file-op', async (e, job) => {
   if (!['copy', 'move', 'trash'].includes(job.kind)) throw new Error('Ukjent operasjon');
   return fileops.run(job, {
     trashItem: (p) => shell.trashItem(p),
+    trashMany,
     onProgress: (p) => { if (!e.sender.isDestroyed()) e.sender.send('op-progress', p); },
   });
 });
 ipcMain.handle('op-cancel', async (_e, id) => fileops.cancel(id));
+
+// Navn som allerede finnes i målmappen (for spørsmålet Erstatt / Hopp over / Behold begge).
+ipcMain.handle('conflicts', async (_e, srcs, destDir) => {
+  const out = [];
+  for (const s of srcs) {
+    if (path.dirname(s) === destDir) continue;
+    const t = path.join(destDir, path.basename(s));
+    try { const st = await fs.promises.lstat(t); out.push({ name: path.basename(s), isDir: st.isDirectory() }); } catch {}
+  }
+  return out;
+});
+
+// ---------- Papirkurv via Finder (slik at det kan angres med «Legg tilbake») ----------
+
+const FINDER_JXA = `
+function run(argv) {
+  var job = JSON.parse(argv[0]);
+  var F = Application('Finder');
+  var out = [];
+  if (job.action === 'trash') {
+    job.paths.forEach(function (p) {
+      try {
+        var r = F.delete(Path(p));
+        var name = null;
+        try { name = r.name(); } catch (e) {}
+        out.push({ path: p, ok: true, name: name });
+      } catch (e) { out.push({ path: p, ok: false, error: String(e) }); }
+    });
+  } else if (job.action === 'putback') {
+    job.items.forEach(function (it) {
+      try {
+        var t = F.trash.items.byName(it.name);
+        t.name();
+        var moved = F.move(t, { to: Path(it.dir) });
+        if (it.name !== it.orig) { try { moved.name = it.orig; } catch (e) {} }
+        out.push({ ok: true, path: it.dir + '/' + it.orig });
+      } catch (e) { out.push({ ok: false, orig: it.orig, error: String(e) }); }
+    });
+  }
+  return JSON.stringify(out);
+}`;
+
+let finderUsable = process.platform === 'darwin';
+let finderScript = null;
+function runFinder(job) {
+  return new Promise((resolve) => {
+    if (!finderScript) {
+      finderScript = path.join(app.getPath('temp'), `filutforsker-finder-${process.pid}.js`);
+      fs.writeFileSync(finderScript, FINDER_JXA);
+    }
+    execFile('/usr/bin/osascript', ['-l', 'JavaScript', finderScript, JSON.stringify(job)], { timeout: 180000, maxBuffer: 8 * 1024 * 1024 }, (err, stdout, stderr) => {
+      if (err && !stdout) return resolve({ error: String(stderr || err.message) });
+      try { resolve({ results: JSON.parse(stdout) }); } catch { resolve({ error: String(stdout) }); }
+    });
+  });
+}
+const DENIED = /-1743|-10004|not authori[sz]ed|ikke tillatelse|not allowed/i;
+
+async function trashMany(paths) {
+  if (finderUsable) {
+    const r = await runFinder({ action: 'trash', paths });
+    if (r.results) {
+      const out = [];
+      for (const x of r.results) {
+        if (x.ok) out.push(x);
+        else {
+          if (DENIED.test(x.error)) finderUsable = false;
+          try { await shell.trashItem(x.path); out.push({ path: x.path, ok: true, name: null }); }
+          catch (e) { out.push({ path: x.path, ok: false, error: e.message }); }
+        }
+      }
+      return out;
+    }
+    if (DENIED.test(r.error)) finderUsable = false;
+  }
+  const out = [];
+  for (const p of paths) {
+    try { await shell.trashItem(p); out.push({ path: p, ok: true, name: null }); }
+    catch (e) { out.push({ path: p, ok: false, error: e.message }); }
+  }
+  return out;
+}
+
+ipcMain.handle('put-back', async (_e, items) => {
+  if (process.platform !== 'darwin') return items.map(() => ({ ok: false, error: 'Bare på Mac' }));
+  const r = await runFinder({ action: 'putback', items });
+  return r.results || items.map(() => ({ ok: false, error: r.error }));
+});
+ipcMain.handle('open-trash', async () => shell.openPath(path.join(HOME, '.Trash')));
+
+// ---------- Forhåndsvisning (Quick Look) ----------
+
+const previewing = new Set();
+ipcMain.handle('preview', async (e, p) => {
+  const w = BrowserWindow.fromWebContents(e.sender);
+  if (!w || typeof w.previewFile !== 'function') return false;
+  if (p) { w.previewFile(p, path.basename(p)); previewing.add(w.id); }
+  else { previewing.delete(w.id); try { w.closeFilePreview(); } catch {} }
+  return true;
+});
 ipcMain.handle('move-into', async (_e, srcs, destDir) => copyInto(srcs, destDir, true));
 
 // ---------- IPC: overvåking av mappe ----------

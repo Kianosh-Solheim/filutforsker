@@ -2,6 +2,14 @@
 
 Hver versjon har en overskrift `## x.y.z`. Teksten under vises i appen når far trykker «Hva er nytt».
 
+## 1.4.0
+
+- Forhåndsvisning: Marker en fil og trykk mellomromstasten for å se den uten å åpne et program. Piltastene bytter fil, og mellomrom eller Esc lukker.
+- Angre med ⌘Z (eller høyreklikk › Angre): nytt navn, ny mappe, kopiering, flytting og sletting. Slettede filer legges tilbake fra papirkurven.
+- Når et element med samme navn allerede finnes, spør appen nå: Erstatt, Hopp over eller Behold begge. Det som erstattes, legges i papirkurven.
+- Hurtigtilgang: Høyreklikk en mappe og velg «Fest i Hurtigtilgang», eller «Løsne» for å fjerne den.
+- Gamle OneDrive-kopier («Personlig (dato)», «Personlig(2)») skjules automatisk fra sidepanelet. De kan vises igjen med «skjult – vis».
+
 ## 1.3.0
 
 - Nytt: Fremdriftsvindu når du kopierer, flytter eller sletter filer, nederst til høyre i vinduet.
