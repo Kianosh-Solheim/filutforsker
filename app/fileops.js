@@ -279,4 +279,6 @@ function finish(job) {
   };
 }
 
-module.exports = { run, cancel, active, uniqueName };
+function cancelAll() { for (const id of jobs.keys()) cancel(id); }
+
+module.exports = { run, cancel, cancelAll, active, uniqueName };

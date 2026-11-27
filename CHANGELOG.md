@@ -2,6 +2,13 @@
 
 Hver versjon har en overskrift `## x.y.z`. Teksten under vises i appen når far trykker «Hva er nytt».
 
+## 1.5.0
+
+- Nytt: Fremdrift i menylinjen øverst på skjermen. Mens filer kopieres, flyttes eller slettes, eller bilder sorteres, vises et lite ikon med en ring som fylles og prosent ved siden av.
+  - Klikk på ikonet for å se hva som pågår, hvor lang tid som er igjen, og for å avbryte.
+- Du kan lukke vinduet mens arbeidet pågår. Det fortsetter i bakgrunnen, og når det er ferdig, kommer et varsel og Filutforsker avslutter av seg selv.
+- ⌘Q midt i arbeid spør om du vil fortsette i bakgrunnen eller stoppe.
+
 ## 1.4.0
 
 - Forhåndsvisning: Marker en fil og trykk mellomromstasten for å se den uten å åpne et program. Piltastene bytter fil, og mellomrom eller Esc lukker.

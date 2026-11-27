@@ -8,6 +8,7 @@ const cloud = require('./cloud');
 const photosort = require('./photosort');
 const updater = require('./updater');
 const fileops = require('./fileops');
+const tracker = require('./tracker');
 
 app.setName('Filutforsker');
 const HOME = os.homedir();
@@ -15,6 +16,8 @@ const HOME = os.homedir();
 // ---------- Vinduer ----------
 
 function createWindow(startPath) {
+  if (app.dock) app.dock.show();
+  tracker.windowOpened();
   const win = new BrowserWindow({
     width: 1240,
     height: 780,
@@ -135,23 +138,61 @@ function buildMenu() {
 app.whenReady().then(() => {
   app.setAboutPanelOptions({ applicationName: 'Filutforsker', applicationVersion: updater.CURRENT, version: '', copyright: 'Kildekode: github.com/Kianosh-Solheim/filutforsker' });
   buildMenu();
+  tracker.init({
+    showWindow: () => {
+      const w = BrowserWindow.getAllWindows()[0];
+      if (w) { if (w.isMinimized()) w.restore(); w.show(); w.focus(); } else createWindow();
+      app.focus({ steal: true });
+    },
+    hasWindows: () => BrowserWindow.getAllWindows().length > 0,
+  });
   createWindow();
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
 });
-app.on('window-all-closed', () => app.quit());
+// Lukkes siste vindu mens noe pågår, fortsetter arbeidet i bakgrunnen med fremdrift i menylinjen.
+app.on('window-all-closed', () => {
+  if (tracker.active()) { if (app.dock) app.dock.hide(); return; }
+  app.quit();
+});
 
-// Advar før appen lukkes midt i en kopiering eller flytting.
+// ⌘Q midt i arbeid: fortsett i bakgrunnen, eller stopp.
 let quitConfirmed = false;
 app.on('before-quit', (e) => {
-  if (quitConfirmed || !fileops.active()) return;
+  if (quitConfirmed || !tracker.active()) return;
+  const hasWin = BrowserWindow.getAllWindows().length > 0;
+  const buttons = hasWin ? ['Fortsett i bakgrunnen', 'Stopp og avslutt', 'Avbryt'] : ['Stopp og avslutt', 'Avbryt'];
   const choice = dialog.showMessageBoxSync({
-    type: 'warning', buttons: ['Fortsett kopieringen', 'Avslutt likevel'], defaultId: 0, cancelId: 0,
-    message: 'En kopiering eller flytting pågår.',
-    detail: 'Avslutter du nå, blir den stoppet. Filer som allerede er ferdige, beholdes, og ingen originaler går tapt.',
+    type: 'warning', buttons, defaultId: 0, cancelId: buttons.length - 1,
+    message: 'Filutforsker er ikke ferdig ennå.',
+    detail: hasWin
+      ? 'Velger du «Fortsett i bakgrunnen», lukkes vinduet og fremdriften vises i menylinjen øverst. Avslutter du nå, blir arbeidet stoppet. Ferdige filer beholdes, og ingen originaler går tapt.'
+      : 'Arbeidet blir stoppet. Ferdige filer beholdes, og ingen originaler går tapt.',
   });
-  if (choice === 0) { e.preventDefault(); return; }
+  const label = buttons[choice];
+  if (label === 'Fortsett i bakgrunnen') {
+    e.preventDefault();
+    for (const w of BrowserWindow.getAllWindows()) w.close();
+    return;
+  }
+  if (label === 'Avbryt') { e.preventDefault(); return; }
+  // Stopp pent: la jobbene rydde bort halvferdige filer før appen avslutter.
   quitConfirmed = true;
+  e.preventDefault();
+  tracker.cancelAll();
+  fileops.cancelAll();
+  const t0 = Date.now();
+  const wait = () => { if (!tracker.active() || Date.now() - t0 > 8000) app.quit(); else setTimeout(wait, 150); };
+  wait();
 });
+
+const OP_LABEL = { copy: ['Kopierer', 'Kopierte'], move: ['Flytter', 'Flyttet'], trash: ['Sletter', 'La i papirkurven'] };
+function placeLabel(p) {
+  if (!p) return '';
+  const c = cloud.cloudRoots().find(r => r.path === p);
+  if (c) return c.label;
+  return path.basename(p) || p;
+}
+const nItems = (n) => `${n} ${n === 1 ? 'element' : 'elementer'}`;
 
 // ---------- Hjelpere ----------
 
@@ -420,11 +461,29 @@ async function copyInto(srcs, destDir, move) {
 ipcMain.handle('copy-into', async (_e, srcs, destDir) => copyInto(srcs, destDir, false));
 ipcMain.handle('file-op', async (e, job) => {
   if (!['copy', 'move', 'trash'].includes(job.kind)) throw new Error('Ukjent operasjon');
-  return fileops.run(job, {
-    trashItem: (p) => shell.trashItem(p),
-    trashMany,
-    onProgress: (p) => { if (!e.sender.isDestroyed()) e.sender.send('op-progress', p); },
-  });
+  const [ing, did] = OP_LABEL[job.kind];
+  const to = job.kind === 'trash' ? '' : ` til ${placeLabel(job.destDir)}`;
+  tracker.start(job.id, { label: `${ing} ${nItems(job.srcs.length)}${to}`, cancel: () => fileops.cancel(job.id) });
+  let r;
+  try {
+    r = await fileops.run(job, {
+      trashItem: (p) => shell.trashItem(p),
+      trashMany,
+      onProgress: (p) => {
+        const byBytes = p.totalBytes > 0;
+        tracker.update(job.id, {
+          done: byBytes ? p.doneBytes : p.doneFiles, total: byBytes ? p.totalBytes : p.totalFiles,
+          current: p.current, indeterminate: p.phase === 'scan', cancelling: p.cancelling,
+        });
+        if (!e.sender.isDestroyed()) e.sender.send('op-progress', p);
+      },
+    });
+    return r;
+  } finally {
+    const failed = r ? r.failed.length + (r.moreFailed || 0) : 0;
+    const summary = !r ? null : r.cancelled ? `${ing} avbrutt` : `${did} ${nItems(r.done.length)}${to}${failed ? ` (${failed} feilet)` : ''}`;
+    tracker.end(job.id, summary);
+  }
 });
 ipcMain.handle('op-cancel', async (_e, id) => fileops.cancel(id));
 
@@ -562,7 +621,17 @@ ipcMain.handle('ps-scan', async (e, opts) => {
 });
 ipcMain.handle('ps-run', async (e, opts) => {
   if (!lastScan) return { error: 'Ingen skanning å bruke.' };
-  const r = await photosort.run(lastScan, opts, (p) => { if (!e.sender.isDestroyed()) e.sender.send('ps-progress', p); });
+  const id = `ps-${Date.now()}`;
+  tracker.start(id, { label: 'Sorterer bilder til All Photos', cancel: () => photosort.cancel() });
+  let r;
+  try {
+    r = await photosort.run(lastScan, opts, (p) => {
+      if (p.phase === 'move') tracker.update(id, { done: p.done, total: p.total, current: p.file ? path.basename(p.file) : '' });
+      if (!e.sender.isDestroyed()) e.sender.send('ps-progress', p);
+    });
+  } finally {
+    tracker.end(id, r ? `Sorterte ${r.moved} ${r.moved === 1 ? 'bilde' : 'bilder'} til All Photos${r.cancelled ? ' (avbrutt)' : ''}` : null);
+  }
   lastScan = null;
   return r;
 });
@@ -578,7 +647,18 @@ ipcMain.handle('gallery-scan', async (e) => {
 });
 ipcMain.handle('gallery-move', async (e, paths) => {
   const files = await photosort.describe(paths);
-  return photosort.run(files, { includeOnline: true }, (p) => { if (!e.sender.isDestroyed()) e.sender.send('gallery-progress', p); });
+  const id = `gal-${Date.now()}`;
+  tracker.start(id, { label: `Flytter ${files.length} ${files.length === 1 ? 'bilde' : 'bilder'} til All Photos`, cancel: () => photosort.cancel() });
+  let r;
+  try {
+    r = await photosort.run(files, { includeOnline: true }, (p) => {
+      if (p.phase === 'move') tracker.update(id, { done: p.done, total: p.total, current: p.file ? path.basename(p.file) : '' });
+      if (!e.sender.isDestroyed()) e.sender.send('gallery-progress', p);
+    });
+    return r;
+  } finally {
+    tracker.end(id, r ? `Flyttet ${r.moved} ${r.moved === 1 ? 'bilde' : 'bilder'} til All Photos${r.cancelled ? ' (avbrutt)' : ''}` : null);
+  }
 });
 
 ipcMain.handle('confirm', async (e, opts) => {
