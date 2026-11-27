@@ -27,6 +27,8 @@ contextBridge.exposeInMainWorld('fx', {
   rename: inv('rename'),
   copyInto: inv('copy-into'),
   moveInto: inv('move-into'),
+  fileOp: inv('file-op'),
+  opCancel: inv('op-cancel'),
   watch: inv('watch'),
   confirm: inv('confirm'),
   psScan: inv('ps-scan'),
@@ -41,7 +43,7 @@ contextBridge.exposeInMainWorld('fx', {
   openExternal: inv('open-external'),
   pathForFile: (file) => { try { return webUtils.getPathForFile(file); } catch { return ''; } },
   on: (ch, fn) => {
-    const allowed = ['menu-cmd', 'dir-changed', 'ps-progress', 'update-progress', 'gallery-progress'];
+    const allowed = ['menu-cmd', 'dir-changed', 'ps-progress', 'update-progress', 'gallery-progress', 'op-progress'];
     if (!allowed.includes(ch)) return;
     ipcRenderer.on(ch, (_e, ...a) => fn(...a));
   },

@@ -837,9 +837,9 @@ function doCopy(mode) {
 async function doPaste(destDir = currentDir()) {
   if (!S.clip || !destDir) return;
   const { mode, paths } = S.clip;
-  const r = mode === 'cut' ? await fx.moveInto(paths, destDir) : await fx.copyInto(paths, destDir);
-  if (mode === 'cut') S.clip = null;
-  reportFailures(r.failed, mode === 'cut' ? 'flytte' : 'kopiere');
+  if (mode === 'cut') { S.clip = null; renderView(); }
+  const r = await runOp(mode === 'cut' ? 'move' : 'copy', paths, destDir);
+  if (tab().loc !== destDir) return;
   await load(tab(), { keepSel: false });
   const t = tab();
   r.done.forEach(p => t.sel.add(p));
@@ -849,9 +849,7 @@ async function doPaste(destDir = currentDir()) {
 async function transfer(paths, destDir, copy) {
   paths = paths.filter(p => p !== destDir);
   if (!paths.length) return;
-  const r = copy ? await fx.copyInto(paths, destDir) : await fx.moveInto(paths, destDir);
-  reportFailures(r.failed, copy ? 'kopiere' : 'flytte');
-  if (r.done.length) toast(`${plural(r.done.length, 'element', 'elementer')} ${copy ? 'kopiert' : 'flyttet'} til ${locLabel(destDir)}.`);
+  await runOp(copy ? 'copy' : 'move', paths, destDir);
   load(tab(), { keepSel: true });
 }
 
@@ -872,10 +870,9 @@ async function doDelete() {
     });
     if (r !== 0) return;
   }
-  const res = await fx.trash(sel.map(i => i.path));
-  reportFailures(res.failed, 'slette');
-  toast(`${plural(sel.length - res.failed.length, 'element', 'elementer')} flyttet til papirkurven.`);
-  load(tab());
+  const dir = tab().loc;
+  await runOp('trash', sel.map(i => i.path), null);
+  if (tab().loc === dir) load(tab());
 }
 
 async function newFolder() {
@@ -1593,6 +1590,205 @@ async function installUpdate() {
   setTimeout(() => fx.updateRestart(), 1500);
 }
 
+// ---------- Fremdrift for filoperasjoner ----------
+
+const OPS = new Map();
+let opSeq = 0;
+const OP_VERB = {
+  copy: { ing: 'Kopierer', done: 'Kopiert', inf: 'kopiere' },
+  move: { ing: 'Flytter', done: 'Flyttet', inf: 'flytte' },
+  trash: { ing: 'Flytter til papirkurven', done: 'Flyttet til papirkurven', inf: 'slette' },
+};
+
+function fmtDuration(sec) {
+  if (!isFinite(sec) || sec < 0) return '';
+  if (sec < 5) return 'noen sekunder';
+  if (sec < 60) return `ca. ${Math.round(sec / 5) * 5} sekunder`;
+  const min = Math.round(sec / 60);
+  if (min < 60) return `ca. ${min} ${min === 1 ? 'minutt' : 'minutter'}`;
+  const hrs = Math.floor(min / 60), rest = min % 60;
+  return `ca. ${hrs} ${hrs === 1 ? 'time' : 'timer'}${rest ? ` ${rest} min` : ''}`;
+}
+const placeName = (p) => (p ? ([...S.places.clouds, ...S.places.quick.filter(q => q.icon !== 'home')].find(c => c.path === p)?.label || basename(p)) : '');
+
+async function runOp(kind, srcs, destDir) {
+  const id = `op${++opSeq}-${Date.now()}`;
+  const op = { id, kind, srcs, destDir, from: dirname(srcs[0]), started: performance.now(), samples: [], speeds: [], last: null, el: null, expanded: LS.get('opsExpanded', true) };
+  OPS.set(id, op);
+  op.showTimer = setTimeout(() => showOp(op), 400);
+  let r;
+  try { r = await fx.fileOp({ id, kind, srcs, destDir }); }
+  catch (e) { r = { done: [], failed: [{ path: srcs[0], error: cleanErr(e) }], cancelled: false }; }
+  clearTimeout(op.showTimer);
+  finishOp(op, r);
+  return r;
+}
+
+function onOpProgress(p) {
+  const op = OPS.get(p.id);
+  if (!op) return;
+  op.last = p;
+  const now = performance.now();
+  op.samples.push({ t: now, b: p.doneBytes });
+  while (op.samples.length > 2 && now - op.samples[0].t > 4000) op.samples.shift();
+  if (!op.lastSpeedAt || now - op.lastSpeedAt > 400) {
+    op.lastSpeedAt = now;
+    op.speeds.push(currentSpeed(op));
+    if (op.speeds.length > 120) op.speeds.shift();
+  }
+  if (op.el) updateOpEl(op);
+}
+
+function currentSpeed(op) {
+  const a = op.samples[0], b = op.samples[op.samples.length - 1];
+  if (!a || !b || b.t - a.t < 300) return 0;
+  return Math.max(0, (b.b - a.b) / ((b.t - a.t) / 1000));
+}
+
+function opsContainer() {
+  let c = $('#ops');
+  if (!c) { c = h('div', { id: 'ops' }); document.body.append(c); }
+  return c;
+}
+
+function showOp(op) {
+  if (op.el || !OPS.has(op.id)) return;
+  const n = op.srcs.length;
+  op.titleEl = h('div', { class: 'op-title' });
+  op.subEl = h('div', { class: 'op-sub' });
+  op.pctEl = h('div', { class: 'op-pct' });
+  op.barEl = h('div');
+  op.progEl = h('div', { class: 'progress' }, op.barEl);
+  op.canvas = h('canvas', { class: 'op-graph', width: 680, height: 112 });
+  op.speedEl = h('div', { class: 'op-speed' });
+  op.rowsEl = h('div', { class: 'op-rows' });
+  op.detailsEl = h('div', { class: 'op-details' }, h('div', { class: 'op-graph-wrap' }, op.canvas, op.speedEl), op.rowsEl);
+  op.toggleEl = h('button', { class: 'op-toggle' });
+  op.toggleEl.addEventListener('click', () => { op.expanded = !op.expanded; LS.set('opsExpanded', op.expanded); updateOpEl(op); });
+  op.cancelEl = h('button', { class: 'btn', onclick: () => { fx.opCancel(op.id); op.cancelEl.disabled = true; op.cancelEl.textContent = 'Avbryter …'; } }, 'Avbryt');
+  const icon = op.kind === 'trash' ? ic('trash') : op.kind === 'move' ? ic('cut') : ic('copy');
+  op.el = h('div', { class: 'op-card' },
+    h('div', { class: 'op-head' }, h('span', { class: 'op-icon' }, icon), op.titleEl),
+    op.subEl, op.pctEl, op.progEl, op.detailsEl,
+    h('div', { class: 'op-foot' }, op.toggleEl, h('div', { class: 'spacer' }), op.cancelEl));
+  op.titleEl.textContent = `${OP_VERB[op.kind].ing} ${plural(n, 'element', 'elementer')}`;
+  opsContainer().append(op.el);
+  updateOpEl(op);
+}
+
+function updateOpEl(op) {
+  const p = op.last || { phase: op.kind === 'trash' ? 'trash' : 'scan', totalBytes: 0, doneBytes: 0, totalFiles: 0, doneFiles: 0 };
+  const from = placeName(op.from), to = placeName(op.destDir);
+  op.subEl.textContent = op.kind === 'trash' ? `fra ${from}` : `fra ${from} til ${to}`;
+  const byBytes = p.totalBytes > 0;
+  const frac = byBytes ? p.doneBytes / p.totalBytes : (p.totalFiles ? p.doneFiles / p.totalFiles : 0);
+  const pct = Math.min(100, Math.floor(frac * 100));
+  const scanning = p.phase === 'scan';
+  op.progEl.classList.toggle('indet', scanning);
+  op.barEl.style.width = scanning ? '' : `${pct}%`;
+  op.pctEl.textContent = scanning ? `Beregner … ${p.totalFiles ? plural(p.totalFiles, 'fil', 'filer') + ' funnet' : ''}` : `${pct} % fullført`;
+  if (p.cancelling) op.pctEl.textContent = 'Avbryter …';
+
+  const speed = currentSpeed(op);
+  const rows = [];
+  if (p.current) rows.push(['Navn', p.current + (p.currentCloud ? ' (lastes ned fra skyen)' : '')]);
+  if (!scanning && byBytes) {
+    const left = Math.max(0, p.totalBytes - p.doneBytes);
+    if (speed > 0 && left > 0) rows.push(['Tid igjen', fmtDuration(left / speed)]);
+    rows.push(['Igjen', `${plural(Math.max(0, p.totalFiles - p.doneFiles), 'fil', 'filer')} (${fmtSize(left)})`]);
+  } else if (!scanning && p.totalFiles) {
+    rows.push(['Igjen', plural(Math.max(0, p.totalFiles - p.doneFiles), 'element', 'elementer')]);
+  }
+  op.rowsEl.innerHTML = '';
+  for (const [k, v] of rows) op.rowsEl.append(h('div', { class: 'op-row' }, h('span', { class: 'k' }, k), h('span', { class: 'v', title: v }, v)));
+  op.speedEl.textContent = byBytes && speed > 0 ? `Hastighet: ${fmtSize(speed)}/s` : '';
+  const showGraph = byBytes && op.kind !== 'trash';
+  op.canvas.parentElement.hidden = !showGraph;
+  op.detailsEl.hidden = !op.expanded;
+  op.toggleEl.innerHTML = '';
+  op.toggleEl.append(ic(op.expanded ? 'chevronDown' : 'chevron'), op.expanded ? 'Færre detaljer' : 'Flere detaljer');
+  if (showGraph && op.expanded) drawOpGraph(op, frac);
+}
+
+function drawOpGraph(op, frac) {
+  const c = op.canvas, g = c.getContext('2d');
+  const W = c.width, H = c.height;
+  const css = getComputedStyle(document.documentElement);
+  g.clearRect(0, 0, W, H);
+  g.fillStyle = css.getPropertyValue('--graph-bg').trim() || '#eef7ee';
+  g.fillRect(0, 0, W, H);
+  const xEnd = Math.max(2, Math.round(W * Math.min(1, frac)));
+  const sp = op.speeds;
+  const max = Math.max(1, ...sp) * 1.15;
+  if (sp.length > 1) {
+    g.beginPath();
+    g.moveTo(0, H);
+    sp.forEach((v, i) => g.lineTo((i / (sp.length - 1)) * xEnd, H - (v / max) * (H - 6)));
+    g.lineTo(xEnd, H);
+    g.closePath();
+    g.fillStyle = css.getPropertyValue('--graph-fill').trim() || '#9fd89a';
+    g.fill();
+    g.beginPath();
+    sp.forEach((v, i) => { const x = (i / (sp.length - 1)) * xEnd, y = H - (v / max) * (H - 6); i ? g.lineTo(x, y) : g.moveTo(x, y); });
+    g.strokeStyle = css.getPropertyValue('--graph-line').trim() || '#13a10e';
+    g.lineWidth = 2;
+    g.stroke();
+  }
+  g.strokeStyle = css.getPropertyValue('--graph-line').trim() || '#13a10e';
+  g.globalAlpha = 0.5;
+  g.lineWidth = 1;
+  g.beginPath(); g.moveTo(xEnd + .5, 0); g.lineTo(xEnd + .5, H); g.stroke();
+  g.globalAlpha = 1;
+}
+
+function finishOp(op, r) {
+  OPS.delete(op.id);
+  const failed = (r.failed || []).length + (r.moreFailed || 0);
+  const ok = (r.done || []).length;
+  const verb = OP_VERB[op.kind];
+  if (!op.el) {
+    // Gikk så raskt at vinduet aldri ble vist: gi bare en kort beskjed.
+    if (failed) toast(`Kunne ikke ${verb.inf} ${plural(failed, 'element', 'elementer')}: ${r.failed[0].error}`, 'error');
+    else if (r.cancelled) toast('Avbrutt.');
+    else if (ok) toast(`${plural(ok, 'element', 'elementer')} ${verb.done.toLowerCase()}${op.kind === 'trash' ? '' : ` til ${placeName(op.destDir)}`}.`);
+    return;
+  }
+  op.cancelEl.remove();
+  op.progEl.classList.remove('indet');
+  op.el.classList.add('finished');
+  if (!r.cancelled && !failed) {
+    op.barEl.style.width = '100%';
+    op.pctEl.textContent = '100 % fullført';
+    op.titleEl.textContent = `${verb.done} ${plural(ok, 'element', 'elementer')}`;
+    op.detailsEl.hidden = true;
+    op.toggleEl.remove();
+    setTimeout(() => closeOp(op), 2200);
+    return;
+  }
+  op.titleEl.textContent = r.cancelled ? 'Avbrutt' : `Ferdig, med ${plural(failed, 'feil', 'feil')}`;
+  op.pctEl.textContent = r.cancelled
+    ? (ok ? `${plural(ok, 'element', 'elementer')} ble ferdig før du avbrøt. Det halvferdige elementet er fjernet, og originalene er urørt.` : 'Ingenting ble endret.')
+    : `${plural(ok, 'element', 'elementer')} ${verb.done.toLowerCase()}. ${plural(failed, 'element', 'elementer')} kunne ikke ${verb.inf}s:`;
+  op.pctEl.classList.add('op-msg');
+  op.progEl.hidden = true;
+  op.detailsEl.hidden = false;
+  op.detailsEl.innerHTML = '';
+  if (failed) {
+    op.detailsEl.append(h('div', { class: 'fail-list' },
+      (r.failed || []).slice(0, 30).map(f => h('div', {}, h('b', {}, basename(f.path)), `: ${f.error}`)),
+      r.moreFailed || (r.failed || []).length > 30 ? h('div', {}, `… og ${(r.failed.length - 30) + (r.moreFailed || 0)} til`) : null));
+  }
+  const foot = op.el.querySelector('.op-foot');
+  foot.innerHTML = '';
+  foot.append(h('div', { class: 'spacer' }), h('button', { class: 'btn accent', onclick: () => closeOp(op) }, 'Lukk'));
+}
+
+function closeOp(op) {
+  if (!op.el) return;
+  op.el.classList.add('closing');
+  setTimeout(() => { op.el.remove(); op.el = null; }, 200);
+}
+
 // ---------- Varsler ----------
 
 let toastTimer = null;
@@ -1813,6 +2009,7 @@ function bindEvents() {
   fx.on('ps-progress', (p) => { if (psProgressHandler) psProgressHandler(p); });
   fx.on('update-progress', (p) => { if (updateProgress) updateProgress(p); });
   fx.on('gallery-progress', onGalleryProgress);
+  fx.on('op-progress', onOpProgress);
   $('#sb-update').addEventListener('click', () => (updateInfo && updateInfo.available ? installUpdate() : checkUpdates(true)));
 }
 

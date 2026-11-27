@@ -7,6 +7,7 @@ const { execFile } = require('child_process');
 const cloud = require('./cloud');
 const photosort = require('./photosort');
 const updater = require('./updater');
+const fileops = require('./fileops');
 
 app.setName('Filutforsker');
 const HOME = os.homedir();
@@ -134,6 +135,19 @@ app.whenReady().then(() => {
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
 });
 app.on('window-all-closed', () => app.quit());
+
+// Advar før appen lukkes midt i en kopiering eller flytting.
+let quitConfirmed = false;
+app.on('before-quit', (e) => {
+  if (quitConfirmed || !fileops.active()) return;
+  const choice = dialog.showMessageBoxSync({
+    type: 'warning', buttons: ['Fortsett kopieringen', 'Avslutt likevel'], defaultId: 0, cancelId: 0,
+    message: 'En kopiering eller flytting pågår.',
+    detail: 'Avslutter du nå, blir den stoppet. Filer som allerede er ferdige, beholdes, og ingen originaler går tapt.',
+  });
+  if (choice === 0) { e.preventDefault(); return; }
+  quitConfirmed = true;
+});
 
 // ---------- Hjelpere ----------
 
@@ -400,6 +414,14 @@ async function copyInto(srcs, destDir, move) {
   return results;
 }
 ipcMain.handle('copy-into', async (_e, srcs, destDir) => copyInto(srcs, destDir, false));
+ipcMain.handle('file-op', async (e, job) => {
+  if (!['copy', 'move', 'trash'].includes(job.kind)) throw new Error('Ukjent operasjon');
+  return fileops.run(job, {
+    trashItem: (p) => shell.trashItem(p),
+    onProgress: (p) => { if (!e.sender.isDestroyed()) e.sender.send('op-progress', p); },
+  });
+});
+ipcMain.handle('op-cancel', async (_e, id) => fileops.cancel(id));
 ipcMain.handle('move-into', async (_e, srcs, destDir) => copyInto(srcs, destDir, true));
 
 // ---------- IPC: overvåking av mappe ----------

@@ -2,6 +2,15 @@
 
 Hver versjon har en overskrift `## x.y.z`. Teksten under vises i appen når far trykker «Hva er nytt».
 
+## 1.3.0
+
+- Nytt: Fremdriftsvindu når du kopierer, flytter eller sletter filer, nederst til høyre i vinduet.
+  - Viser prosent fullført, hastighet med graf, gjenstående tid, hvilken fil som behandles og hvor mye som er igjen.
+  - «Avbryt» stopper når som helst. Ferdige filer beholdes, den halvferdige fjernes, og originalene røres ikke.
+  - Når filer lastes ned fra skyen underveis, står det tydelig.
+- Flytting mellom ulike disker kopierer først og legger originalen i papirkurven først når alt er kopiert uten feil.
+- Appen advarer hvis du prøver å avslutte midt i en kopiering.
+
 ## 1.2.0
 
 - Nytt: Galleri. Viser alle bilder og videoer på Macen og i iCloud Drive, OneDrive, Google Drive og Dropbox.
